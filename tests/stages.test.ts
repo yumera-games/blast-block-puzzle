@@ -61,11 +61,16 @@ const SOLUTIONS: Record<number, Move[]> = {
     { t: 2, r: 7, c: 5 }, // h3 → 行 7 完成、Bomb を巻きこむ
   ],
   10: [{ t: 0, r: 7, c: 2 }], // 行 7 → ROCKET 単独起爆 → 射線が BOMB へ届いて combo → CHAIN 3
+  11: [
+    { t: 0, r: 6, c: 3 }, // v2 → 行 6・7 同時完成 → たて ROCKET（列 3 に向く）
+    { t: 1, r: 6, c: 0 }, // h3 → 行 6 を埋める
+    { t: 2, r: 6, c: 4 }, // h4 → 行 6 完成 → ROCKET の射線が BOMB(3,3) へ届いて COMBO
+  ],
 };
 
 describe('ステージデータの健全性', () => {
-  it('Stage 1〜10 が定義されている', () => {
-    expect(STAGES.map((s) => s.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  it('Stage 1〜11 が定義されている', () => {
+    expect(STAGES.map((s) => s.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
   it('seed は全ステージで固定されている', () => {
@@ -104,7 +109,7 @@ describe('ステージデータの健全性', () => {
   });
 });
 
-describe('Stage 1〜10 を想定解で通しプレイする', () => {
+describe('Stage 1〜11 を想定解で通しプレイする', () => {
   for (const stage of STAGES) {
     it(`Stage ${stage.id}: ${stage.name} をクリアできる`, () => {
       const st = play(stage.id, SOLUTIONS[stage.id]!);
@@ -221,6 +226,55 @@ describe('意図したルールが実際に発生する', () => {
 
     // スコアは wave ごとに積み上がる（どの wave も 0 点で終わらない）
     for (const e of r.events) expect(e.score).toBeGreaterThan(0);
+
+    // 目的は ROCKET+BOMB COMBO と CHAIN 3 の 2 本立て
+    expect(st.def.objectives.map((o) => o.kind)).toEqual(['combo', 'chain']);
+    expect(st.def.objectives[0]!.effect).toBe('rocket+bomb');
+    expect(st.objectiveProgress().every((o) => o.done)).toBe(true);
+  });
+
+  it('Stage 11: 初期状態ではクリア済みでない', () => {
+    const st = new StageState(stageById(11));
+    expect(st.status).toBe('playing');
+    expect(st.objectiveProgress().every((o) => o.done)).toBe(false);
+    expect(st.def.tutorial.showGuide).toBe(false);
+    // 答えを書いた intro は付けない（自力で移せるかを見るため）
+    expect(st.def.tutorial.intro).toBeUndefined();
+  });
+
+  it('Stage 11: 想定解では ROCKET を作って残し、BOMB へ届かせて COMBO になる', () => {
+    const st = new StageState(stageById(11));
+
+    // 1 手目: 行 6・7 を同時に消して たて ROCKET を作る。BOMB はまだ残す。
+    st.place(0, 6, 3);
+    expect(st.lastResult!.events[0]!.lines.length).toBe(2);
+    expect(st.lastResult!.specialsCreated).toEqual(['rocket']);
+    expect(st.board.specialIndices().length).toBe(2); // ROCKET と BOMB が並存
+    expect(st.status).toBe('playing');
+
+    // 2〜3 手目: ROCKET の行をそろえて巻きこむ
+    st.place(1, 6, 0);
+    st.place(2, 6, 4);
+    const d = st.lastResult!.events[1]!.detonations[0]!;
+    expect(d.effect).toBe('rocket+bomb');
+    expect(d.group.length).toBe(2);
+    expect(st.status).toBe('cleared');
+  });
+
+  it('Stage 11: 孤立 BOMB をすぐ単独起爆すると COMBO 目的へ届かなくなる', () => {
+    const st = new StageState(stageById(11));
+    // わな: 行 3 の残り 1 マスを埋めて BOMB を単独起爆させてしまう
+    const out = st.place(0, 2, 7);
+    expect(out.ok).toBe(true);
+    const dets = st.lastResult!.events[1]!.detonations;
+    expect(dets.length).toBe(1);
+    expect(dets[0]!.effect).toBe('bomb'); // combo ではない
+    expect(dets[0]!.group.length).toBe(1);
+    expect(st.objectiveProgress()[0]!.current).toBe(0);
+    // 盤面から特殊が消え、2セット目は横向きばかりなので行 6・7 を同時に消せない。
+    // ＝ もう特殊を作れず、COMBO 目的は達成不能になる。
+    expect(st.board.specialIndices().length).toBe(0);
+    expect(st.status).toBe('playing'); // まだ手数は残るが目的には届かない
   });
 });
 

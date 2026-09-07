@@ -221,6 +221,15 @@ function measure(obj: Objective, r: ResolutionResult): number {
       return r.specialsCreated.filter((k) => !obj.special || k === obj.special).length;
     case 'specialDetonated':
       return r.specialsDetonated.filter((k) => !obj.special || k === obj.special).length;
+    case 'combo': {
+      // 特殊 x 特殊 で起爆したグループを数える。effect 指定があればその組み合わせだけ。
+      // 1 グループ＝1 回なので、同じ combo を二重に数えることはない。
+      let n = 0;
+      for (const e of r.events)
+        for (const d of e.detonations)
+          if (d.group.length >= 2 && (!obj.effect || d.effect === obj.effect)) n++;
+      return n;
+    }
     case 'chain':
       return r.maxChain >= (obj.param ?? 2) ? 1 : 0;
   }

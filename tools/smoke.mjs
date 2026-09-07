@@ -8,7 +8,7 @@
  *   ② 320〜430px 幅で縦横にはみ出さない
  *   ③ 盤面とトレイが画面内に収まる
  *   ④ 実際にドラッグして配置できる（マウスとタッチの両方）
- *   ⑤ Stage 1〜10 を順に読み込める
+ *   ⑤ Stage 1〜11 を順に読み込める
  *   ⑥ debug 表示を ON / OFF できる
  */
 import { existsSync } from 'fs';
@@ -161,7 +161,7 @@ if (before !== after) ng.push('occupied セルへドラッグしたのに配置�
 else note.push('  配置不可の位置へ落としても盤面が変わらない');
 
 // ⑤ Stage 1〜10 を順に読み込む
-for (let id = 1; id <= 10; id++) {
+for (let id = 1; id <= 11; id++) {
   await page.evaluate((n) => window.__blast.goStage(n), id);
   await page.waitForTimeout(160);
   const s = await page.evaluate(() => window.__blast.state());
@@ -169,7 +169,7 @@ for (let id = 1; id <= 10; id++) {
   if (s.status !== 'playing') ng.push(`Stage ${id} が開始直後に ${s.status} になっている`);
   if (s.objectives.length === 0) ng.push(`Stage ${id} に objective がない`);
 }
-note.push('  Stage 1〜10 をすべて読み込めた');
+note.push('  Stage 1〜11 をすべて読み込めた');
 
 // ⑥ debug の ON/OFF
 const dbgOn = await page.evaluate(() => {
@@ -195,6 +195,7 @@ const SOLUTIONS = {
   8: [[0, 7, 0], [1, 7, 4], [2, 0, 0], [0, 4, 0]],
   9: [[0, 7, 4], [1, 7, 0], [2, 7, 5]],
   10: [[0, 7, 2]],
+  11: [[0, 6, 3], [1, 6, 0], [2, 6, 4]],
 };
 
 async function waitIdle() {
@@ -210,7 +211,7 @@ async function closeCard() {
 }
 
 const played = [];
-for (let id = 1; id <= 10; id++) {
+for (let id = 1; id <= 11; id++) {
   await page.evaluate((n) => window.__blast.goStage(n), id);
   await page.waitForTimeout(200);
   await closeCard();
@@ -255,6 +256,8 @@ for (let id = 1; id <= 10; id++) {
     ng.push('Stage 10: 効果到達型 combo (rocket+bomb) が起きていない');
   if (id === 10 && !(acc.waveScores.length === 3 && acc.waveScores.every((v) => v > 0)))
     ng.push(`Stage 10: wave ごとのスコアが積み上がっていない (${acc.waveScores})`);
+  if (id === 11 && !acc.effects.some((e) => e.includes('+')))
+    ng.push('Stage 11: 特殊 x 特殊 の COMBO が起きていない');
 
   await closeCard();
 }

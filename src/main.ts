@@ -3,6 +3,7 @@ import { GameScene, type SceneHooks } from './scenes/GameScene';
 import { Hud } from './ui/Hud';
 import { TutorialOverlay } from './ui/TutorialOverlay';
 import { DebugPanel } from './ui/DebugPanel';
+import { PlayMetrics } from './ui/PlayMetrics';
 import { computeLayout, type Layout } from './ui/layout';
 import { FIRST_STAGE, LAST_STAGE, STAGES } from './data/stages';
 import type { StageState } from './game/StageState';
@@ -21,6 +22,8 @@ const $ = (id: string): HTMLElement => {
 };
 
 const hud = new Hud($('hud'));
+/** 人間プレイ観察用。メモリ上だけで、外部送信も永続化もしない。 */
+const metrics = new PlayMetrics();
 const tutorial = new TutorialOverlay($('hint'));
 const overlay = $('overlay');
 const overlayCard = $('overlayCard');
@@ -36,6 +39,15 @@ const hooks: SceneHooks = {
     hud.update(state, chainNow, shown);
     debug.render({ state, lastResult: state.lastResult, chainNow, fps: Math.round(game.loop.actualFps) });
   },
+  onPreview(preview) {
+    metrics.onPreview(previewKey(preview), preview);
+  },
+  onPlaced(state, result, shownPreview) {
+    metrics.onPlaced(state, result, shownPreview);
+  },
+  onIllegalDrop() {
+    metrics.onIllegalDrop();
+  },
   onStageStart(state) {
     const intro = tutorial.takeIntro(state.def);
     if (intro) showCard({ title: `STAGE ${state.def.id}`, body: intro, buttons: [{ label: 'START', primary: true }] });
@@ -49,11 +61,21 @@ const hooks: SceneHooks = {
 
 const scene = new GameScene(hooks);
 
-const debug = new DebugPanel($('debug'), (id) => {
-  currentStage = id;
-  hideCard();
-  scene.loadStage(id);
-});
+const debug = new DebugPanel(
+  $('debug'),
+  (id) => {
+    currentStage = id;
+    hideCard();
+    scene.loadStage(id);
+  },
+  () => metrics.toJSON(),
+);
+
+/** 予告の同一性キー。同じ候補セルを何度も数えないためだけに使う。 */
+function previewKey(p: { triggerCells: readonly number[]; comboCells: readonly number[]; effect: string | null } | null): string {
+  if (!p) return 'none';
+  return `${p.triggerCells.join(',')}|${p.comboCells.join(',')}|${p.effect ?? '-'}`;
+}
 
 const game = new Phaser.Game({
   type: Phaser.CANVAS, // Gray Box は矩形だけなので CANVAS で十分（依存を減らす）
@@ -124,11 +146,11 @@ function showClear(state: StageState): void {
     stats: `SCORE ${state.score}   MOVES USED ${state.movesUsed}   MAX CHAIN ${state.maxChain}`,
     buttons: isLast
       ? [
-          { label: 'RETRY', onClick: () => scene.retry() },
+          { label: 'RETRY', onClick: () => retryStage() },
           { label: 'STAGE 1', primary: true, onClick: () => goStage(FIRST_STAGE) },
         ]
       : [
-          { label: 'RETRY', onClick: () => scene.retry() },
+          { label: 'RETRY', onClick: () => retryStage() },
           { label: 'NEXT STAGE', primary: true, onClick: () => goStage(state.def.id + 1) },
         ],
   });
@@ -141,12 +163,18 @@ function showFailed(state: StageState): void {
     titleClass: 'ng',
     body: reason,
     stats: `SCORE ${state.score}`,
-    buttons: [{ label: 'RETRY', primary: true, onClick: () => scene.retry() }],
+    buttons: [{ label: 'RETRY', primary: true, onClick: () => retryStage() }],
   });
+}
+
+function retryStage(): void {
+  metrics.begin(currentStage, true);
+  scene.retry();
 }
 
 function goStage(id: number): void {
   currentStage = Math.max(FIRST_STAGE, Math.min(LAST_STAGE, id));
+  metrics.begin(currentStage, false);
   scene.loadStage(currentStage);
 }
 
@@ -155,6 +183,7 @@ function goStage(id: number): void {
 $('btnRetry').addEventListener('click', () => {
   hideCard();
   tutorial.forgetIntro(currentStage);
+  metrics.begin(currentStage, true);
   scene.retry();
 });
 
@@ -174,6 +203,7 @@ $('btnDebug').addEventListener('click', () => {
 
 game.events.once('ready', () => {
   resize();
+  metrics.begin(currentStage, false);
   scene.loadStage(currentStage);
 });
 
@@ -204,6 +234,8 @@ window.__blast = {
     };
   },
   place: (trayIndex: number, row: number, col: number) => scene.stageState.canPlace(trayIndex, row, col),
+  /** 計測 JSON（DBG と同じもの）。自動確認から読むため。 */
+  metrics: () => metrics.toJSON(),
   /** 直前の resolution の要約（自動確認から意図したルールが起きたか読むため）。 */
   last: () => {
     const r = scene.stageState.lastResult;

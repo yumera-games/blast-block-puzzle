@@ -16,13 +16,30 @@ export interface DebugInfo {
 export class DebugPanel {
   private readonly root: HTMLElement;
   private readonly body: HTMLElement;
+  private readonly metricsArea: HTMLTextAreaElement;
+  private readonly metricsJson?: () => string;
   private enabled = false;
 
-  constructor(root: HTMLElement, onJumpStage: (id: number) => void) {
+  constructor(root: HTMLElement, onJumpStage: (id: number) => void, metricsJson?: () => string) {
     this.root = root;
     this.root.innerHTML = `<div class="body"><div id="dbgRows"></div>
-      <div class="stage-jump" id="dbgJump"></div></div>`;
+      <div class="stage-jump" id="dbgJump"></div>
+      <div class="metrics">
+        <button id="dbgCopy">COPY METRICS</button>
+        <textarea id="dbgMetrics" readonly rows="6"></textarea>
+      </div></div>`;
     this.body = this.root.querySelector('#dbgRows') as HTMLElement;
+
+    // 計測値の取り出し口。外部送信も永続化もしない。Clipboard が使えなくても
+    // textarea なので画面上で選択してコピーできる。
+    const area = this.root.querySelector('#dbgMetrics') as HTMLTextAreaElement;
+    this.metricsArea = area;
+    this.metricsJson = metricsJson;
+    (this.root.querySelector('#dbgCopy') as HTMLElement).addEventListener('click', () => {
+      area.value = metricsJson ? metricsJson() : '[]';
+      area.select();
+      void navigator.clipboard?.writeText(area.value).catch(() => undefined);
+    });
 
     const jump = this.root.querySelector('#dbgJump') as HTMLElement;
     jump.innerHTML = STAGES.map((s) => `<button data-stage="${s.id}">S${s.id}</button>`).join('');
@@ -40,6 +57,7 @@ export class DebugPanel {
   toggle(): boolean {
     this.enabled = !this.enabled;
     this.root.classList.toggle('on', this.enabled);
+    if (this.enabled && this.metricsJson) this.metricsArea.value = this.metricsJson();
     return this.enabled;
   }
 

@@ -1,4 +1,5 @@
 import type { Color, PieceSpec, SpecialKind } from '../game/types';
+import type { ComboEffect } from './combos';
 
 /* ==========================================================================
    ステージデータ
@@ -15,6 +16,7 @@ export type ObjectiveKind =
   | 'colorBlast'
   | 'specialCreated'
   | 'specialDetonated'
+  | 'combo'
   | 'chain';
 
 export interface Objective {
@@ -24,6 +26,9 @@ export interface Objective {
   /** kind ごとの閾値。simultaneousLines=同時本数 / colorBlast=セル数 / chain=CHAIN数。 */
   readonly param?: number;
   readonly special?: SpecialKind;
+  /** kind='combo' のとき、特定の組み合わせだけを数えたい場合に指定する。
+   *  省略すると「特殊 x 特殊 ならどれでも」になる。 */
+  readonly effect?: ComboEffect;
   /** HUD 表示文。データ側に持ち、コードへ散在させない。 */
   readonly label: string;
 }
@@ -328,7 +333,7 @@ export const STAGES: readonly StageDef[] = [
   // と進む。「最初は 1 個 → 届いた相手を取り込んで combo → さらに連鎖」が 1 手で見える。
   {
     id: 10,
-    name: 'CHAIN 3',
+    name: 'ROCKET + BOMB の COMBO',
     seed: 1010,
     moves: 8,
     initialBoard: [
@@ -342,13 +347,50 @@ export const STAGES: readonly StageDef[] = [
       'RB.^YGPB',
     ],
     fixedSets: [[p('dot', 'green'), p('dot', 'purple'), p('dot', 'red')]],
-    objectives: [{ kind: 'chain', target: 1, param: 3, label: 'CHAIN 3 以上を 1回' }],
+    objectives: [
+      { kind: 'combo', target: 1, effect: 'rocket+bomb', label: 'ROCKET + BOMB の COMBO を 1回' },
+      { kind: 'chain', target: 1, param: 3, label: 'CHAIN 3 以上を 1回' },
+    ],
     tutorial: {
       intro:
-        '特殊の 効果が 別の 特殊へ 届くと、いっしょに 起爆します（combo）。\n' +
-        'その先の 特殊へ さらに 届くと、CHAIN が のびていきます。',
+        '特殊の 効果が 別の 特殊へ 届くと、2つが いっしょに 起爆します。\n' +
+        'これが COMBO です。\n' +
+        'ドラッグ中に 出る 予告で、どこへ 届くかを 確かめられます。',
       showGuide: false,
     },
+  },
+
+  // --------------------------------------------------------------- Stage 11
+  // Stage 10 で教えた考え方を、案内なしで別の盤面へ移せるかを見る転移確認。
+  //   ねらいの手順: 行 6・7 を同時に消して たて ROCKET を作る（列 3 に向く）
+  //                 → BOMB(3,3) を残したまま 行 6 をそろえる
+  //                 → ROCKET の射線が BOMB へ届いて COMBO
+  //   わな: 行 3 は残り 1 マス。埋めると BOMB が単独起爆して COMBO の相手が居なくなる。
+  {
+    id: 11,
+    name: 'COMBO を 自分で 作る',
+    seed: 1011,
+    moves: 6,
+    initialBoard: [
+      '........',
+      '........',
+      '........',
+      'RBY*GPR.',
+      '........',
+      '........',
+      'RBY.GPRB',
+      'BYG.PRBY',
+    ],
+    fixedSets: [
+      [p('v2', 'green'), p('h3', 'blue'), p('h4', 'purple')],
+      // 2セット目はすべて横向き＋1マス。行 6 と行 7 を「同時に」そろえる手段が無いので、
+      // 1セット目の v2 をわなに使ってしまうと、以後どう打っても特殊を作れない
+      // （色もばらしてあるので COLOR BLAST 8 以上も作れない）＝ COMBO 目的に届かなくなる。
+      [p('dot', 'red'), p('h2', 'yellow'), p('h3', 'green')],
+    ],
+    objectives: [{ kind: 'combo', target: 1, label: '特殊 x 特殊 の COMBO を 1回' }],
+    // 答えは書かない。Stage 10 の考え方を自分で移せるかを見る。
+    tutorial: { showGuide: false },
   },
 ];
 

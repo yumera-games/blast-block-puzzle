@@ -25,6 +25,13 @@ export const UI = {
   ghostOk: 0xffffff,
   ghostNg: 0xff7a7a,
   lineHighlight: 0xffd166,
+  /** ドラッグ予告（Gray Box。アートではなく読み取り用の識別色）。 */
+  previewLine: 0xffffff,
+  previewReach: 0x7ab8ff,
+  previewTrigger: 0xffd166,
+  previewCombo: 0xff6fc8,
+  /** 中央表示・予告ラベルの下敷き。 */
+  textPlate: 0x0d1016,
   detonation: 0xffffff,
   hint: 0x7ab8ff,
   special: 0x11151c,

@@ -4,6 +4,8 @@ import { StageState, type Presentation } from '../game/StageState';
 import { stageById } from '../data/stages';
 import type { TutorialHint } from '../data/stages';
 import type { Cell, Piece, ResolutionEvent, ResolutionResult } from '../game/types';
+import { comboName, comboPreviewLabel } from '../data/combos';
+import { previewPlacement, type PreviewResult } from '../game/Preview';
 import { CELL_COLOR, CELL_EDGE, UI } from '../ui/colors';
 import { PieceTray } from '../ui/PieceTray';
 import type { Layout } from '../ui/layout';
@@ -29,6 +31,10 @@ export interface SceneHooks {
   onStageStart(state: StageState): void;
   /** クリア / 失敗が確定したとき。 */
   onStageEnd(state: StageState): void;
+  /** 以下は計測用の任意フック。ゲーム進行には影響しない。 */
+  onPreview?(preview: PreviewResult | null): void;
+  onPlaced?(state: StageState, result: ResolutionResult | null, shownPreview: PreviewResult | null): void;
+  onIllegalDrop?(): void;
 }
 
 interface FadingCell {
@@ -60,6 +66,15 @@ export class GameScene extends Phaser.Scene {
 
   private g!: Phaser.GameObjects.Graphics;
   private chainText!: Phaser.GameObjects.Text;
+  /** COMBO の組み合わせ名（ROCKET + BOMB など）。 */
+  private comboNameText!: Phaser.GameObjects.Text;
+  /** COMBO! の文字。CHAIN とは別の概念なので別の行に出す。 */
+  private comboTagText!: Phaser.GameObjects.Text;
+  /** ドラッグ予告の説明ラベル。指で隠れないよう盤面の上端に置く。 */
+  private previewText!: Phaser.GameObjects.Text;
+
+  /** ドラッグ予告のキャッシュ。対象セルが変わったときだけ作り直す。 */
+  private preview: { key: string; result: PreviewResult | null } | null = null;
 
   private drag: { trayIndex: number; x: number; y: number } | null = null;
   private busy = false;
@@ -80,9 +95,17 @@ export class GameScene extends Phaser.Scene {
   // Phaser.Scene の型定義に create は無い（実行時にフックされる）ので override は付けない
   create(): void {
     this.g = this.add.graphics();
-    this.chainText = this.add
-      .text(0, 0, '', { fontFamily: 'ui-monospace, monospace', fontStyle: 'bold', color: '#ffd166' })
-      .setOrigin(0.5)
+    const centered = (color: string) =>
+      this.add
+        .text(0, 0, '', { fontFamily: 'ui-monospace, monospace', fontStyle: 'bold', color })
+        .setOrigin(0.5)
+        .setAlpha(0);
+    this.comboNameText = centered('#ff9ede');
+    this.comboTagText = centered('#ff6fc8');
+    this.chainText = centered('#ffd166');
+    this.previewText = this.add
+      .text(0, 0, '', { fontFamily: 'ui-monospace, monospace', fontStyle: 'bold', color: '#cfe6ff' })
+      .setOrigin(0.5, 0)
       .setAlpha(0);
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onDown(p));
@@ -109,6 +132,8 @@ export class GameScene extends Phaser.Scene {
     this.flashes = [];
     this.chainNow = 0;
     this.shownWaves = 0;
+    this.preview = null;
+    if (this.chainText) this.hideCenterTexts();
     this.refreshHint();
     this.hooks.onStageStart(this.state);
     this.emit();
@@ -123,6 +148,8 @@ export class GameScene extends Phaser.Scene {
     this.flashes = [];
     this.chainNow = 0;
     this.shownWaves = 0;
+    this.preview = null;
+    if (this.chainText) this.hideCenterTexts();
     this.refreshHint();
     this.emit();
   }
@@ -146,15 +173,39 @@ export class GameScene extends Phaser.Scene {
     this.layout = layout;
     if (this.tray) this.tray.setLayout(layout);
     else this.tray = new PieceTray(layout);
-    if (this.chainText) {
-      this.chainText.setFontSize(Math.round(layout.cell * 0.9));
-      this.chainText.setPosition(layout.boardX + layout.boardW / 2, layout.boardY + layout.boardH / 2);
-    }
+    if (this.chainText) this.layoutCenterTexts();
   }
 
   /** 表示側への通知。**論理状態ではなく、演出の進みに合わせた途中経過を渡す。** */
   private emit(): void {
     this.hooks.onUpdate(this.state, this.chainNow, this.state.presentation(this.shownWaves));
+  }
+
+  /**
+   * 中央表示の縦位置。COMBO 表示があるときは 3 行に積む。
+   *   ROCKET + BOMB   ← 組み合わせ名
+   *   COMBO!          ← 特殊 x 特殊 が成立したという合図
+   *   CHAIN 2         ← resolution が何 wave 続いたか（別概念）
+   */
+  private layoutCenterTexts(): void {
+    const l = this.layout;
+    const cx = l.boardX + l.boardW / 2;
+    const cy = l.boardY + l.boardH / 2;
+    const combo = this.comboTagText.alpha > 0;
+    this.comboNameText.setFontSize(Math.round(l.cell * 0.5));
+    this.comboTagText.setFontSize(Math.round(l.cell * 0.72));
+    this.chainText.setFontSize(Math.round(l.cell * 0.9));
+    this.comboNameText.setPosition(cx, cy - l.cell * 1.05);
+    this.comboTagText.setPosition(cx, cy - l.cell * 0.4);
+    this.chainText.setPosition(cx, combo ? cy + l.cell * 0.5 : cy);
+    this.previewText.setFontSize(Math.round(l.cell * 0.42));
+    this.previewText.setPosition(cx, l.boardY + l.cell * 0.22);
+  }
+
+  private hideCenterTexts(): void {
+    this.comboNameText.setAlpha(0);
+    this.comboTagText.setAlpha(0);
+    this.chainText.setAlpha(0);
   }
 
   private refreshHint(): void {
@@ -208,7 +259,34 @@ export class GameScene extends Phaser.Scene {
     const target = this.dragTarget();
     const dragged = this.drag;
     this.drag = null; // 置けなければ候補は元の位置へ戻る（消さない）
-    if (target && target.ok) this.commitPlacement(dragged.trayIndex, target.row, target.col);
+    const shown = this.preview;
+    this.preview = null;
+    if (target && target.ok) {
+      this.commitPlacement(dragged.trayIndex, target.row, target.col, shown?.result ?? null);
+    } else {
+      this.hooks.onIllegalDrop?.();
+    }
+  }
+
+  /**
+   * ドラッグ予告。**対象セルが変わったときだけ**作り直す（毎フレーム総当たりしない）。
+   * 置けない場所では null にして何も出さない。
+   */
+  private currentPreview(): PreviewResult | null {
+    const target = this.dragTarget();
+    if (!this.drag || !target || !target.ok) {
+      this.preview = null;
+      return null;
+    }
+    const key = `${this.drag.trayIndex}:${target.row}:${target.col}`;
+    if (this.preview?.key === key) return this.preview.result;
+    const piece = this.state.tray[this.drag.trayIndex];
+    if (!piece) return null;
+    // 盤面の clone に対する純粋関数。本番の StageState・RNG・uid・トレイを一切触らない。
+    const result = previewPlacement(this.state.board, piece, target.row, target.col);
+    this.preview = { key, result };
+    this.hooks.onPreview?.(result);
+    return result;
   }
 
   /** ドラッグ中のピースが着地するマス。 */
@@ -224,11 +302,20 @@ export class GameScene extends Phaser.Scene {
     return { row, col, ok: this.state.canPlace(this.drag.trayIndex, row, col) };
   }
 
-  private commitPlacement(trayIndex: number, row: number, col: number): void {
+  private commitPlacement(
+    trayIndex: number,
+    row: number,
+    col: number,
+    shownPreview: PreviewResult | null,
+  ): void {
     const piece = this.state.tray[trayIndex];
     if (!piece) return;
     const outcome = this.state.place(trayIndex, row, col);
-    if (!outcome.ok) return;
+    if (!outcome.ok) {
+      this.hooks.onIllegalDrop?.();
+      return;
+    }
+    this.hooks.onPlaced?.(this.state, outcome.result ?? null, shownPreview);
 
     // 表示用の盤面にも同じ配置を反映する（resolution は event を追って適用する）。
     // スコアと目的は、この時点ではまだ 1 波も出さない（演出より先に結果を見せないため）。
@@ -257,7 +344,7 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(t, () => {
       this.busy = false;
       this.chainNow = 0;
-      this.chainText.setAlpha(0);
+      this.hideCenterTexts();
       this.syncView();
       this.finishTurn();
     });
@@ -273,10 +360,24 @@ export class GameScene extends Phaser.Scene {
     for (const d of ev.detonations) {
       this.flashes.push({ cells: d.cells, color: UI.detonation, until: this.time.now + TIMING.detonationFlash });
     }
+    // COMBO と CHAIN は別概念。combo 判定は Detonation.effect だけを見る（盤面は見ない）。
+    const combo = ev.detonations.map((d) => comboName(d.effect)).find((n) => n !== null) ?? null;
+    if (combo) {
+      this.comboNameText.setText(combo);
+      this.comboTagText.setText('COMBO!');
+      this.comboNameText.setAlpha(1);
+      this.comboTagText.setAlpha(1);
+    } else {
+      this.comboNameText.setAlpha(0);
+      this.comboTagText.setAlpha(0);
+    }
     if (ev.chainIndex >= 2) {
       this.chainText.setText(`CHAIN ${ev.chainIndex}`);
       this.chainText.setAlpha(1);
+    } else {
+      this.chainText.setAlpha(0);
     }
+    this.layoutCenterTexts();
     this.emit();
   }
 
@@ -353,11 +454,40 @@ export class GameScene extends Phaser.Scene {
       for (const i of f.cells) g.fillRect(this.cellX(i), this.cellY(i), l.cell, l.cell);
     }
 
-    // ゴースト（配置予定位置）
+    // ドラッグ予告（起爆・combo）→ その上にゴースト
+    this.drawPreview(g);
     this.drawGhost(g);
+
+    // 中央表示と予告ラベルの下敷き。Gray Box のセルに文字が埋もれるのを防ぐ。
+    this.drawTextPlates(g);
 
     // トレイ
     this.drawTray(g);
+  }
+
+  /**
+   * 文字の下敷き。Text は Graphics より後に生成しているので必ず上へ重なる。
+   * 盤面を隠しすぎないよう、**文字が出ている行だけ**を暗くする。
+   */
+  private drawTextPlates(g: Phaser.GameObjects.Graphics): void {
+    const pad = this.layout.cell * 0.22;
+    const shown = [this.comboNameText, this.comboTagText, this.chainText].filter((t) => t.alpha > 0);
+    if (shown.length > 0) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const t of shown) {
+        x0 = Math.min(x0, t.x - t.width / 2);
+        y0 = Math.min(y0, t.y - t.height / 2);
+        x1 = Math.max(x1, t.x + t.width / 2);
+        y1 = Math.max(y1, t.y + t.height / 2);
+      }
+      g.fillStyle(UI.textPlate, 0.82);
+      g.fillRect(x0 - pad, y0 - pad, x1 - x0 + pad * 2, y1 - y0 + pad * 2);
+    }
+    if (this.previewText.alpha > 0) {
+      const t = this.previewText;
+      g.fillStyle(UI.textPlate, 0.86);
+      g.fillRect(t.x - t.width / 2 - pad, t.y - pad * 0.5, t.width + pad * 2, t.height + pad);
+    }
   }
 
   private cellX(index: number): number {
@@ -379,6 +509,45 @@ export class GameScene extends Phaser.Scene {
       g.fillRect(x + 1, y + 1, l.cell - 2, l.cell - 2);
       g.lineStyle(Math.max(2, l.cell * 0.07), UI.hint, 0.85);
       g.strokeRect(x + 2, y + 2, l.cell - 4, l.cell - 4);
+    }
+  }
+
+  /**
+   * 起爆・combo の予告。**Gray Box のまま**色・枠・半透明だけで表す。点滅はさせない。
+   * 説明ラベルは盤面の上端に出す（指とピースは下側にあるので隠れない）。
+   */
+  private drawPreview(g: Phaser.GameObjects.Graphics): void {
+    const pv = this.currentPreview();
+    if (!pv) {
+      this.previewText.setAlpha(0);
+      return;
+    }
+    const l = this.layout;
+    const box = (i: number, color: number, alpha: number) => {
+      g.fillStyle(color, alpha);
+      g.fillRect(this.cellX(i), this.cellY(i), l.cell, l.cell);
+    };
+    const frame = (i: number, color: number) => {
+      g.lineStyle(Math.max(2, l.cell * 0.09), color, 0.95);
+      g.strokeRect(this.cellX(i) + 2, this.cellY(i) + 2, l.cell - 4, l.cell - 4);
+    };
+
+    for (const i of pv.lineCells) box(i, UI.previewLine, 0.16);
+    for (const i of pv.reachCells) box(i, UI.previewReach, 0.20);
+    for (const i of pv.triggerCells) frame(i, UI.previewTrigger);
+    for (const i of pv.comboCells) frame(i, UI.previewCombo);
+
+    const label = comboPreviewLabel(pv.effect);
+    if (label) {
+      this.previewText.setText(label);
+      this.previewText.setColor('#ff9ede');
+      this.previewText.setAlpha(1);
+    } else if (pv.triggerCells.length > 0) {
+      this.previewText.setText('起爆');
+      this.previewText.setColor('#cfe6ff');
+      this.previewText.setAlpha(1);
+    } else {
+      this.previewText.setAlpha(0);
     }
   }
 

@@ -69,11 +69,14 @@ describe('演出中の表示は wave 単位で進む', () => {
     expect(st.presentation(waveScores.length).score).toBe(st.score);
   });
 
-  it('CHAIN 3 の目的は、最後の wave を再生するまで達成にならない', () => {
+  it('目的は成立した wave まで再生して初めて点く（COMBO は wave2 / CHAIN3 は wave3）', () => {
     const st = stage10();
-    expect(st.presentation(1).objectives[0]!.done).toBe(false);
-    expect(st.presentation(2).objectives[0]!.done).toBe(false);
-    expect(st.presentation(3).objectives[0]!.done).toBe(true);
+    const done = (n: number) => st.presentation(n).objectives.map((o) => o.done);
+    expect(st.def.objectives.map((o) => o.kind)).toEqual(['combo', 'chain']);
+    expect(done(0)).toEqual([false, false]);
+    expect(done(1)).toEqual([false, false]); // ライン消去だけ。まだ何も成立していない
+    expect(done(2)).toEqual([true, false]);  // rocket+bomb の COMBO が成立
+    expect(done(3)).toEqual([true, true]);   // 3 wave 目まで進んで CHAIN 3
     expect(st.presentation(3).settled).toBe(true);
   });
 

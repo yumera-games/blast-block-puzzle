@@ -119,6 +119,14 @@ button.btn.narrow { flex: 0 0 64px; }
 #debug .v.risky { color: var(--warn); }
 #debug .v.dead { color: var(--ng); }
 #debug .stage-jump { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+#debug .metrics { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+#debug .metrics textarea {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  background: #0d1016; color: var(--fg); border: 1px solid var(--line); border-radius: 4px;
+  font: 10px/1.4 ui-monospace, monospace; padding: 4px;
+  /* Clipboard が無い環境でも手で選択できるようにする */
+  user-select: text; -webkit-user-select: text;
+}
 #debug .stage-jump button {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
   border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 8px; cursor: pointer;
