@@ -1,0 +1,125 @@
+/* Phase 1 Gray Box。**アートは作らない。** 情報が読めることだけを目的にする。 */
+:root {
+  --bg: #14161c;
+  --panel: #1e222b;
+  --panel-2: #272c37;
+  --line: #39404f;
+  --text: #e8ecf4;
+  --muted: #98a2b6;
+  --accent: #7ab8ff;
+  --ok: #6ede8a;
+  --ng: #ff7a7a;
+  --warn: #ffd166;
+  --hud-h: 92px;
+  --ctrl-h: 44px;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 500 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans JP", monospace;
+  -webkit-text-size-adjust: 100%;
+  overflow: hidden;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: calc(6px + env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom));
+  gap: 6px;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+/* ---------------------------------------------------------------- HUD */
+#hud { flex: 0 0 auto; }
+.hud-row { display: flex; gap: 6px; align-items: stretch; }
+.hud-box {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 8px;
+  min-width: 0;
+}
+.hud-box .k { font-size: 10px; color: var(--muted); letter-spacing: .08em; }
+.hud-box .v { font-size: 17px; font-variant-numeric: tabular-nums; }
+.hud-box.grow { flex: 1 1 0; }
+.hud-stage .v { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#chainBox .v { color: var(--warn); }
+#movesBox.low .v { color: var(--ng); }
+
+#objectives { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
+.obj {
+  display: flex; gap: 6px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 3px 8px; font-size: 12px;
+}
+.obj .mark { flex: 0 0 auto; width: 14px; text-align: center; color: var(--muted); }
+.obj.done .mark { color: var(--ok); }
+.obj .lbl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.obj .num { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--muted); }
+.obj.done .num { color: var(--ok); }
+
+/* ---------------------------------------------------- board + tray (canvas) */
+#stage-wrap { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; }
+#game canvas { display: block; touch-action: none; }
+
+/* ------------------------------------------------------------- 下部の操作 */
+#controls { flex: 0 0 auto; display: flex; gap: 6px; }
+button.btn {
+  flex: 1 1 0;
+  height: var(--ctrl-h);
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+button.btn:active { background: #323949; }
+button.btn.primary { background: #2b4a6b; border-color: #3d6d9c; }
+button.btn:disabled { opacity: .4; }
+button.btn.narrow { flex: 0 0 64px; }
+
+/* ------------------------------------------------------------- オーバーレイ */
+#overlay { position: fixed; inset: 0; z-index: 20; display: none; overflow-y: auto;
+           justify-content: center; padding: 16px; background: rgba(10, 12, 16, .78); }
+#overlay.on { display: flex; }
+#overlay .card {
+  margin: auto; width: 100%; max-width: 340px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 16px; text-align: center;
+}
+#overlay h2 { margin: 0 0 8px; font-size: 18px; }
+#overlay h2.ok { color: var(--ok); }
+#overlay h2.ng { color: var(--ng); }
+#overlay p { margin: 6px 0; font-size: 13px; color: var(--muted); white-space: pre-wrap; text-align: left; }
+#overlay .stats { font-size: 12px; color: var(--muted); margin: 10px 0; }
+#overlay .btns { display: flex; gap: 6px; margin-top: 12px; }
+
+/* ------------------------------------------------------------------ debug */
+#debug { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom));
+         z-index: 30; display: none; }
+#debug.on { display: block; }
+#debug .body {
+  background: rgba(14, 16, 22, .94); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px; font-size: 11px; line-height: 1.55; max-height: 42vh; overflow: auto;
+}
+#debug .row { display: flex; gap: 8px; }
+#debug .row .k { color: var(--muted); flex: 0 0 116px; }
+#debug .row .v { flex: 1 1 auto; word-break: break-all; }
+#debug .v.safe { color: var(--ok); }
+#debug .v.risky { color: var(--warn); }
+#debug .v.dead { color: var(--ng); }
+#debug .stage-jump { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+#debug .stage-jump button {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 8px; cursor: pointer;
+}

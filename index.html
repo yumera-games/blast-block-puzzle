@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Project BLAST BLOCK — Phase 1 Gray Box">
+<title>BLAST BLOCK — Phase 1</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="hud"></div>
+    <div id="stage-wrap"><div id="game"></div></div>
+    <div id="hint"></div>
+    <div id="controls">
+      <button class="btn" id="btnRetry">RETRY</button>
+      <button class="btn" id="btnStages">STAGE</button>
+      <button class="btn narrow" id="btnDebug">DBG</button>
+    </div>
+  </div>
+  <div id="overlay"><div class="card" id="overlayCard"></div></div>
+  <div id="debug"></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
