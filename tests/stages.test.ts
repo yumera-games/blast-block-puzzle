@@ -60,7 +60,7 @@ const SOLUTIONS: Record<number, Move[]> = {
     { t: 1, r: 7, c: 0 }, // h4
     { t: 2, r: 7, c: 5 }, // h3 → 行 7 完成、Bomb を巻きこむ
   ],
-  10: [{ t: 0, r: 7, c: 3 }], // 行 7 → rocket+bomb combo → 上の Rocket へ届いて CHAIN 3
+  10: [{ t: 0, r: 7, c: 2 }], // 行 7 → ROCKET 単独起爆 → 射線が BOMB へ届いて combo → CHAIN 3
 };
 
 describe('ステージデータの健全性', () => {
@@ -193,15 +193,32 @@ describe('意図したルールが実際に発生する', () => {
     expect(st.status).toBe('cleared');
   });
 
-  it('Stage 10: 1 手で combo と連続起爆が起き、CHAIN 3 に届く', () => {
+  it('Stage 10: 1 個の起爆が届いた相手を取り込んで combo になり、CHAIN 3 まで伸びる', () => {
     const st = play(10, SOLUTIONS[10]!);
     const r = st.lastResult!;
     expect(r.maxChain).toBe(3);
-    // wave2 は「射線が BOMB へ届いた」combo、wave3 はその効果が届いた先の Rocket
-    expect(r.events[1]!.detonations[0]!.effect).toBe('rocket+bomb');
-    expect(r.events[2]!.detonations[0]!.effect).toBe('rocket');
-    expect(r.specialsDetonated).toEqual(['rocket', 'bomb', 'rocket']);
+
+    // wave1: ライン消去だけ。巻きこまれる特殊は ROCKET 1 個で、まだ起爆はしない。
+    expect(r.events[0]!.detonations.length).toBe(0);
+
+    // wave2: その ROCKET が単独で起爆待ちになり、射線上の BOMB を取り込んで combo になる。
+    const w2 = r.events[1]!.detonations;
+    expect(w2.length).toBe(1);
+    expect(w2[0]!.effect).toBe('rocket+bomb');
+    expect(w2[0]!.group.map((g) => g.kind)).toEqual(['bomb', 'rocket']);
+
+    // wave3: combo の十字が届いた先の ROCKET。取り込みではなく連鎖として次の wave になる。
+    const w3 = r.events[2]!.detonations;
+    expect(w3.length).toBe(1);
+    expect(w3[0]!.effect).toBe('rocket');
+    expect(w3[0]!.group.length).toBe(1);
+
+    // 二重起爆していない（3 個の特殊がそれぞれ 1 回だけ）
+    const uids = r.events.flatMap((e) => e.detonations.flatMap((d) => d.group.map((g) => g.uid)));
+    expect(uids.length).toBe(3);
+    expect(new Set(uids).size).toBe(3);
     expect(r.aborted).toBe(false);
+
     // スコアは wave ごとに積み上がる（どの wave も 0 点で終わらない）
     for (const e of r.events) expect(e.score).toBeGreaterThan(0);
   });

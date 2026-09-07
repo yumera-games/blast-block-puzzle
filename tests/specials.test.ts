@@ -55,7 +55,7 @@ describe('特殊ピースの起爆', () => {
     expect(board.get(3, 5).kind).toBe('empty');
   });
 
-  it('特殊から特殊への連鎖（CHAIN 3 以上）', () => {
+  it('射線が届いた BOMB は、次の wave ではなくその場で combo になる', () => {
     const { result } = playOne(
       rows({ 2: '..YYY...', 3: '..Y*Y...', 4: '..YYY...', 7: 'RB.^YGPB' }),
       'dot',
@@ -63,10 +63,26 @@ describe('特殊ピースの起爆', () => {
       7,
       2,
     );
-    expect(result.maxChain).toBeGreaterThanOrEqual(3);
-    expect(result.specialsDetonated).toEqual(['rocket', 'bomb']);
-    expect(result.events[1]!.detonations[0]!.effect).toBe('rocket');
-    expect(result.events[2]!.detonations[0]!.effect).toBe('bomb');
+    expect(result.maxChain).toBe(2);
+    expect(result.specialsDetonated).toEqual(['bomb', 'rocket']);
+    expect(result.events[1]!.detonations[0]!.effect).toBe('rocket+bomb');
+    expect(result.aborted).toBe(false);
+  });
+
+  it('combo の合成効果が別の特殊へ届けば CHAIN が伸びる', () => {
+    // wave2 で rocket+bomb の combo。その十字が (4,5) の ROCKET を巻きこみ wave3 へ。
+    // (4,5) は ROCKET の射線(列2)にも BOMB の 3x3 にも入らないので、取り込みではなく連鎖になる。
+    const { result } = playOne(
+      rows({ 0: '.....Y..', 1: '.....Y..', 3: '..*.....', 4: '.....^..', 7: 'RB^YGPR.' }),
+      'dot',
+      'blue',
+      7,
+      7,
+    );
+    expect(result.maxChain).toBe(3);
+    expect(result.events[1]!.detonations[0]!.effect).toBe('rocket+bomb');
+    expect(result.events[2]!.detonations[0]!.effect).toBe('rocket');
+    expect(result.events[2]!.removed.length).toBe(2); // 列 5 に残っていた 2 セル
     expect(result.aborted).toBe(false);
   });
 });
@@ -94,12 +110,89 @@ describe('combo は効果の到達で決まる', () => {
     expect(dets.map((d) => d.effect)).toEqual(['rocket', 'bomb']);
   });
 
-  it('同じ resolution に居るだけでは combo にならない（別 wave なら別扱い）', () => {
-    // 行 7 で ROCKET(縦) が起爆 → その射線が列 2 の BOMB を巻きこむ → 次の wave で BOMB。
+  it('起爆待ちが ROCKET だけでも、射線上の BOMB を取り込んで combo になる', () => {
+    // 行 7 の ROCKET(縦) だけが起爆待ち。列 2 の BOMB は盤面に残っているだけだが、
+    // 射線が直接届くので、次の wave へ送らずその場で combo にする。
     const { result } = playOne(rows({ 3: '..*.....', 7: 'RB^YGPR.' }), 'dot', 'blue', 7, 7);
-    expect(result.maxChain).toBe(3);
-    expect(result.events[1]!.detonations[0]!.effect).toBe('rocket');
-    expect(result.events[2]!.detonations[0]!.effect).toBe('bomb');
+    expect(result.maxChain).toBe(2); // 通常 CHAIN ではなく 1 回の combo
+    const dets = result.events[1]!.detonations;
+    expect(dets.length).toBe(1);
+    expect(dets[0]!.effect).toBe('rocket+bomb');
+    expect(dets[0]!.group.map((g) => g.kind)).toEqual(['bomb', 'rocket']); // index 昇順
+  });
+
+  it('起爆待ちが BOMB だけでも、範囲内の ROCKET を取り込んで combo になる', () => {
+    // (7,2) の BOMB だけが起爆待ち。その 3x3 が (6,2) の ROCKET へ届く。
+    const { result } = playOne(rows({ 6: '..^.....', 7: 'RB*YGPR.' }), 'dot', 'blue', 7, 7);
+    expect(result.maxChain).toBe(2);
+    const dets = result.events[1]!.detonations;
+    expect(dets.length).toBe(1);
+    expect(dets[0]!.effect).toBe('rocket+bomb');
+    expect(dets[0]!.group.map((g) => g.kind)).toEqual(['rocket', 'bomb']);
+  });
+
+  it('A が B へ、B が C へ届くなら 3 個が同じ combo グループになる', () => {
+    // (7,2) 縦 ROCKET → 列 2 の BOMB(3,2) → その 3x3 内の ROCKET(4,3)
+    const { result } = playOne(rows({ 3: '..*.....', 4: '...^....', 7: 'RB^YGPR.' }), 'dot', 'blue', 7, 7);
+    const dets = result.events[1]!.detonations;
+    expect(dets.length).toBe(1);
+    expect(dets[0]!.group.length).toBe(3);
+    expect(dets[0]!.group.map((g) => g.index)).toEqual([26, 35, 58]); // index 昇順
+    expect(result.maxChain).toBe(2); // 3 個まとめて 1 回で起爆する
+  });
+
+  it('効果が届かない特殊は、同じ resolution 内でも取り込まれない', () => {
+    // (7,2) の BOMB の 3x3 は行 6-7。(0,2) の BOMB へは届かないので盤面に残る。
+    const { board, result } = playOne(rows({ 0: '..*.....', 7: 'RB*YGPR.' }), 'dot', 'blue', 7, 7);
+    const dets = result.events[1]!.detonations;
+    expect(dets.length).toBe(1);
+    expect(dets[0]!.effect).toBe('bomb');
+    expect(dets[0]!.group.length).toBe(1);
+    expect(result.specialsDetonated).toEqual(['bomb']);
+    expect(board.get(0, 2).kind).toBe('bomb'); // 巻きこまれず残っている
+  });
+
+  it('取り込まれた特殊は次の wave で二重起爆しない', () => {
+    const { result } = playOne(rows({ 3: '..*.....', 4: '...^....', 7: 'RB^YGPR.' }), 'dot', 'blue', 7, 7);
+    const uids = result.events.flatMap((e) => e.detonations.flatMap((d) => d.group.map((g) => g.uid)));
+    expect(uids.length).toBe(3);
+    expect(new Set(uids).size).toBe(uids.length); // 同じ uid は 1 回だけ
+    expect(result.aborted).toBe(false);
+  });
+
+  /** 色つきの特殊を置いた盤面で、(7,7) へ dot を落として行 7 を完成させる。 */
+  function withColoredSpecials(
+    place: (b: Board) => void,
+    map: Record<number, string> = { 7: 'RB.YGPR.' },
+  ): ResolutionResult {
+    const board = Board.fromStrings(rows(map));
+    place(board);
+    const placed = board.place(shapeById('dot').cells, 7, 7, 'blue' as Color);
+    return resolveBoard(board, { placedCells: placed, placedColor: 'blue' });
+  }
+
+  it('RAINBOW は、対象色を持つ盤面の特殊を取り込む', () => {
+    // RAINBOW(青) が起爆待ち。(3,3) の BOMB は青なので、対象色として届く扱いにする。
+    const result = withColoredSpecials((b) => {
+      b.putSpecial(b.idx(7, 2), 'rainbow', 1, 'blue', null);
+      b.putSpecial(b.idx(3, 3), 'bomb', 2, 'blue', null);
+    });
+    const dets = result.events[1]!.detonations;
+    expect(dets.length).toBe(1);
+    expect(dets[0]!.effect).toBe('rainbow+bomb');
+    expect(dets[0]!.group.map((g) => g.kind)).toEqual(['bomb', 'rainbow']); // index 昇順
+  });
+
+  it('RAINBOW の対象色と違う特殊は取り込まない', () => {
+    // 同じ配置でも BOMB が赤なら、対象色（青）ではないので届かない。
+    const result = withColoredSpecials((b) => {
+      b.putSpecial(b.idx(7, 2), 'rainbow', 1, 'blue', null);
+      b.putSpecial(b.idx(3, 3), 'bomb', 2, 'red', null);
+    });
+    const dets = result.events[1]!.detonations;
+    expect(dets.length).toBe(1);
+    expect(dets[0]!.effect).toBe('rainbow');
+    expect(dets[0]!.group.length).toBe(1);
   });
 
   it('到達は片方向でも成立する（BOMB の範囲が ROCKET を含む）', () => {
@@ -120,7 +213,8 @@ describe('combo は効果の到達で決まる', () => {
   });
 
   it('combo 処理は決定論的（同じ盤面なら毎回同じ結果）', () => {
-    const run = () => playOne(rows({ 3: '..*.....', 7: 'R>Y*B*R.' }), 'dot', 'blue', 7, 7).result;
+    // 盤面に残っている BOMB を取り込むケースを含めて、毎回同じ結果になることを見る。
+    const run = () => playOne(rows({ 3: '..*.....', 4: '...^....', 7: 'R>Y*B*R.' }), 'dot', 'blue', 7, 7).result;
     const shape = (r: ResolutionResult) =>
       JSON.stringify(
         r.events.map((e) => e.detonations.map((d) => ({ effect: d.effect, cells: d.cells, group: d.group.map((s) => s.uid) }))),

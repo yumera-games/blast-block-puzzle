@@ -178,52 +178,81 @@ function reaches(from: SoloReach, to: SpecialInstance): boolean {
 }
 
 /**
- * 同一 wave で起爆する特殊を「効果の到達」でグループ化する（Phase 2A）。
+ * この wave で起爆する特殊を「効果の到達」でグループ化する（Phase 2A）。
  *
- * **隣接しているかどうかは見ない。** ある特殊が単独で起爆したときの効果範囲が
- * 別の特殊へ実際に届いたときだけ、その2つを同じ combo グループにする。
- * 到達は片方向でも成立させ、グループは推移閉包を取る
+ * **隣接しているかどうかは見ない。**
+ * 起点は起爆待ち（pending）の特殊。ある特殊が単独で起爆したときの効果範囲が
+ * 別の特殊へ届いたら、**その相手がまだ起爆待ちでなくても**（＝盤面に残っているだけでも）
+ * 同じグループへ取り込み、1つの combo として処理する。
+ * 取り込んだ相手の単独効果がさらに別の特殊へ届けば、そのまま推移閉包を取る
  * （A の射線が B に届き、B の範囲が C に届くなら A・B・C で1グループ）。
  *
- * 同じ wave に居るだけでは combo にならない。順序は index 昇順で決定論。
+ * 起爆待ちどうしは、どちらか片方が届けば結ぶ（両方とも起爆するため）。
+ * 盤面に残っているだけの特殊は「届かれた」ときにだけ取り込む（自分からは起爆しない）。
+ * 同じ resolution に居るだけ・同じ wave に居るだけでは combo にならない。
+ *
+ * 走査はすべて index 昇順で、結果は決定論。
+ *
+ * @param pending  この wave で起爆が確定している特殊（消去に巻きこまれたもの）
+ * @param onBoard  盤面に残っていて、まだ起爆していない特殊（取り込み候補）
  */
 export function groupByEffectReach(
-  specials: readonly SpecialInstance[],
+  pending: readonly SpecialInstance[],
+  onBoard: readonly SpecialInstance[],
   ctx: DetonationContext,
 ): SpecialInstance[][] {
-  const ordered = [...specials].sort((a, b) => a.index - b.index);
-  const n = ordered.length;
-  if (n <= 1) return n === 1 ? [[ordered[0]!]] : [];
+  const seeds = [...pending].sort((a, b) => a.index - b.index);
+  if (seeds.length === 0) return [];
 
-  const solo = ordered.map((s) => soloReach(s, ctx));
-  const linked = ordered.map(() => new Set<number>());
-  for (let a = 0; a < n; a++) {
-    for (let b = 0; b < n; b++) {
-      if (a === b) continue;
-      if (!reaches(solo[a]!, ordered[b]!)) continue;
-      linked[a]!.add(b);
-      linked[b]!.add(a); // 到達は片方向でも、combo は相互のものとして扱う
+  const seedUids = new Set(seeds.map((s) => s.uid));
+  const candidates = [...seeds, ...onBoard.filter((s) => !seedUids.has(s.uid))].sort(
+    (a, b) => a.index - b.index,
+  );
+
+  // 単独効果は uid ごとに 1 回だけ求める（同じ wave 内で結果が変わらないため）。
+  const reachCache = new Map<number, SoloReach>();
+  const reachOf = (s: SpecialInstance): SoloReach => {
+    let r = reachCache.get(s.uid);
+    if (!r) {
+      r = soloReach(s, ctx);
+      reachCache.set(s.uid, r);
     }
-  }
+    return r;
+  };
 
-  const seen = new Set<number>();
+  const claimed = new Set<number>();
   const groups: SpecialInstance[][] = [];
-  for (let start = 0; start < n; start++) {
-    if (seen.has(start)) continue;
-    const members: number[] = [];
-    const queue = [start];
-    seen.add(start);
+
+  for (const seed of seeds) {
+    if (claimed.has(seed.uid)) continue;
+    const members: SpecialInstance[] = [seed];
+    claimed.add(seed.uid);
+    const queue: SpecialInstance[] = [seed];
+
     while (queue.length > 0) {
-      const a = queue.shift()!;
-      members.push(a);
-      for (const b of [...linked[a]!].sort((x, y) => x - y)) {
-        if (seen.has(b)) continue;
-        seen.add(b);
-        queue.push(b);
+      const cur = queue.shift()!;
+
+      // 1. cur の効果が届く先を取り込む（起爆待ちでなかった盤面の特殊も対象）
+      for (const cand of candidates) {
+        if (claimed.has(cand.uid)) continue;
+        if (!reaches(reachOf(cur), cand)) continue;
+        claimed.add(cand.uid);
+        members.push(cand);
+        queue.push(cand);
+      }
+
+      // 2. 起爆待ちどうしは、相手から cur へ届く場合も結ぶ
+      for (const other of seeds) {
+        if (claimed.has(other.uid)) continue;
+        if (!reaches(reachOf(other), cur)) continue;
+        claimed.add(other.uid);
+        members.push(other);
+        queue.push(other);
       }
     }
-    members.sort((x, y) => x - y);
-    groups.push(members.map((i) => ordered[i]!));
+
+    members.sort((a, b) => a.index - b.index);
+    groups.push(members);
   }
   return groups;
 }

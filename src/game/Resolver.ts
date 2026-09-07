@@ -77,7 +77,8 @@ export function resolveBoard(board: Board, opts: ResolveOptions = {}): Resolutio
     const detonationCells = new Set<number>();
     if (pending.length > 0) {
       const detCtx = { board, fallbackColor: placedColor };
-      const groups = groupByEffectReach(pending, detCtx);
+      // 起爆待ちだけでなく、盤面に残っている特殊も「効果が届いたら巻きこむ」候補に入れる。
+      const groups = groupByEffectReach(pending, boardSpecials(board, detonatedUids), detCtx);
       for (const group of groups) {
         for (const s of group) detonatedUids.add(s.uid);
         const d = detonate(group, detCtx);
@@ -178,6 +179,22 @@ export function summarizeEvents(events: readonly ResolutionEvent[], aborted = fa
 
 function snapshot(cell: Cell): Cell {
   return { ...cell };
+}
+
+/**
+ * 盤面に残っていて、まだ起爆していない特殊。
+ * 「起爆の効果が届いたら巻きこむ」combo の取り込み候補になる。
+ * 起爆待ちの特殊はこの時点ですでに盤面から消えているので、ここには出てこない。
+ */
+function boardSpecials(board: Board, detonatedUids: ReadonlySet<number>): SpecialInstance[] {
+  const out: SpecialInstance[] = [];
+  for (const i of board.specialIndices()) {
+    const cell = board.at(i);
+    if (!isSpecialKind(cell.kind)) continue;
+    if (detonatedUids.has(cell.uid)) continue;
+    out.push({ uid: cell.uid, kind: cell.kind, index: i, color: cell.color, dir: cell.dir });
+  }
+  return out;
 }
 
 /** piece の中心（セル座標の平均）。空なら null。 */

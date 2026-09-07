@@ -23,7 +23,7 @@ describe('resolution の集計', () => {
 
   it('先頭 n wave の集計は、n が最終 wave のとき全体の集計と一致する', () => {
     const st = new StageState(stageById(10));
-    st.place(0, 7, 3);
+    st.place(0, 7, 2);
     const r = st.lastResult!;
     const full = summarizeEvents(r.events, r.aborted);
     expect(full.totalScore).toBe(r.totalScore);
@@ -39,7 +39,7 @@ describe('演出中の表示は wave 単位で進む', () => {
   /** Stage 10 は 1 手で 3 wave 進むので、途中経過の検証に使える。 */
   const stage10 = () => {
     const st = new StageState(stageById(10));
-    st.place(0, 7, 3);
+    st.place(0, 7, 2);
     return st;
   };
 

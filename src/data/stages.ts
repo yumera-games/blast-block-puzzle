@@ -322,9 +322,10 @@ export const STAGES: readonly StageDef[] = [
 
   // --------------------------------------------------------------- Stage 10
   // プレイヤーの 1 手で起爆が始まり、
-  //   wave1 ライン消去 → wave2 ROCKET の射線が BOMB へ届いて combo →
-  //   combo の十字が 上の ROCKET へ届いて wave3
-  // と進む。combo と連続起爆の両方が 1 回の resolution に入る。
+  //   wave1 ライン消去（巻きこまれるのは ROCKET 1 個だけ）
+  //   wave2 その ROCKET が起爆 → 射線(列 3)が盤面の BOMB へ直接届いて combo へ昇格
+  //   wave3 combo の十字が 上の ROCKET へ届いて連鎖
+  // と進む。「最初は 1 個 → 届いた相手を取り込んで combo → さらに連鎖」が 1 手で見える。
   {
     id: 10,
     name: 'CHAIN 3',
@@ -332,13 +333,13 @@ export const STAGES: readonly StageDef[] = [
     moves: 8,
     initialBoard: [
       'YY..>.YY',
-      '...YYY..',
+      '........',
+      '..R.R...',
+      '..R*R...',
+      '..R.R...',
       '........',
       '........',
-      '........',
-      '........',
-      '..RR....',
-      'RB>.*GPB',
+      'RB.^YGPB',
     ],
     fixedSets: [[p('dot', 'green'), p('dot', 'purple'), p('dot', 'red')]],
     objectives: [{ kind: 'chain', target: 1, param: 3, label: 'CHAIN 3 以上を 1回' }],
