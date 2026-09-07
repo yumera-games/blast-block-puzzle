@@ -3,9 +3,9 @@ import { Board } from '../game/Board';
 import { StageState, type Presentation } from '../game/StageState';
 import { stageById } from '../data/stages';
 import type { TutorialHint } from '../data/stages';
-import type { Cell, Piece, ResolutionEvent, ResolutionResult } from '../game/types';
+import type { Cell, Piece, ResolutionEvent, ResolutionResult, SpecialInstance } from '../game/types';
 import { comboPreviewLabel } from '../data/combos';
-import { waveNotice } from '../data/resultText';
+import { TEACH_PROMPT, type TeachKind, waveMark, waveNotice } from '../data/resultText';
 import { previewPlacement, type PreviewResult } from '../game/Preview';
 import { CELL_COLOR, CELL_EDGE, UI } from '../ui/colors';
 import { PieceTray } from '../ui/PieceTray';
@@ -70,14 +70,29 @@ export class GameScene extends Phaser.Scene {
   private chainText!: Phaser.GameObjects.Text;
   /** COMBO の組み合わせ名（ROCKET + BOMB など）。 */
   private comboNameText!: Phaser.GameObjects.Text;
-  /** COMBO! の文字。CHAIN とは別の概念なので別の行に出す。 */
-  private comboTagText!: Phaser.GameObjects.Text;
-  /** COMBO の意味（特殊 2個が いっしょに起爆！）。語だけでは伝わらないため添える。 */
+  /** COMBO の意味（2個同時＝COMBO）。語だけでは伝わらないため添える。 */
   private comboNoteText!: Phaser.GameObjects.Text;
   /** CHAIN の意味（消去が 2回 つづいた！）。COMBO とは別の枠に出す。 */
   private chainNoteText!: Phaser.GameObjects.Text;
   /** ドラッグ予告の説明ラベル。指で隠れないよう盤面の上端に置く。 */
   private previewText!: Phaser.GameObjects.Text;
+  /** 教材表示を止めているあいだの案内（タップで つづける）。 */
+  private teachPromptText!: Phaser.GameObjects.Text;
+  /** KEEP 教材の小さな図に添える語。 */
+  private keepLabelText!: Phaser.GameObjects.Text;
+  /** wave 番号（①②）。盤面のセルの上に置く。 */
+  private badgeTexts: Phaser.GameObjects.Text[] = [];
+
+  /** このステージで出す盤面上の教材表示。 */
+  private teach: readonly TeachKind[] = [];
+  /** この resolution で振った wave 番号。1 wave = 1 個。 */
+  private waveBadges: { index: number; wave: number }[] = [];
+  /** いっしょに起爆した特殊。枠と矢印で結ぶ。 */
+  private comboLink: { specials: readonly SpecialInstance[] } | null = null;
+  /** 教材表示を読ませるために演出を止めているあいだの解除関数。 */
+  private teachHold: (() => void) | null = null;
+  /** このステージで教材の一時停止をもう出したか（繰り返して邪魔にしない）。 */
+  private teachHeld = false;
 
   /** ドラッグ予告のキャッシュ。対象セルが変わったときだけ作り直す。 */
   private preview: { key: string; result: PreviewResult | null } | null = null;
@@ -107,16 +122,25 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setAlpha(0);
     this.comboNameText = centered('#ff9ede');
-    this.comboTagText = centered('#ff6fc8');
-    this.comboNoteText = centered('#ffc7e8');
+    this.comboNoteText = centered('#ff6fc8');
     this.chainText = centered('#ffd166');
     this.chainNoteText = centered('#ffe4a8');
+    this.teachPromptText = centered('#cfe6ff');
+    this.keepLabelText = centered('#7ab8ff');
+    this.badgeTexts = Array.from({ length: 6 }, () => centered('#1a1e26'));
     this.previewText = this.add
       .text(0, 0, '', { fontFamily: 'ui-monospace, monospace', fontStyle: 'bold', color: '#cfe6ff' })
       .setOrigin(0.5, 0.5)
       .setAlpha(0);
 
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onDown(p));
+    // 教材の一時停止はタップで解除する。busy 判定より先に見る。
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (this.teachHold) {
+        this.teachHold();
+        return;
+      }
+      this.onDown(p);
+    });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMove(p));
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onUp(p));
     this.input.on('pointerupoutside', (p: Phaser.Input.Pointer) => this.onUp(p));
@@ -134,6 +158,9 @@ export class GameScene extends Phaser.Scene {
   loadStage(id: number): void {
     this.state = new StageState(stageById(id));
     this.view = this.state.board.clone();
+    this.teach = this.state.def.tutorial.teach ?? [];
+    this.teachHeld = false;
+    this.resetTeachVisuals();
     this.busy = false;
     this.drag = null;
     this.fading = [];
@@ -150,6 +177,8 @@ export class GameScene extends Phaser.Scene {
   retry(): void {
     this.state.reset();
     this.view = this.state.board.clone();
+    this.teachHeld = false;
+    this.resetTeachVisuals();
     this.busy = false;
     this.drag = null;
     this.fading = [];
@@ -204,9 +233,8 @@ export class GameScene extends Phaser.Scene {
     const cy = l.boardY + l.boardH / 2;
     // 行の並び。size はセル比の文字サイズ、gap は次の行とのすき間（セル比）。
     const rows = [
-      { t: this.comboNameText, size: 0.5, gap: 0.1 },
-      { t: this.comboTagText, size: 0.72, gap: 0.1 },
-      { t: this.comboNoteText, size: 0.4, gap: 0.42 },
+      { t: this.comboNameText, size: 0.62, gap: 0.1 },
+      { t: this.comboNoteText, size: 0.46, gap: 0.42 },
       { t: this.chainText, size: 0.9, gap: 0.1 },
       { t: this.chainNoteText, size: 0.4, gap: 0 },
     ];
@@ -219,11 +247,18 @@ export class GameScene extends Phaser.Scene {
     visible.forEach((r, i) => {
       total += r.t.displayHeight + (i < visible.length - 1 ? r.gap * l.cell : 0);
     });
-    let y = cy - total / 2;
+    // combo を結んだ線と枠は盤面の真ん中を通る。文字で隠すと「何と何が結ばれたか」が
+    // 読めなくなるので、そのときだけ盤面の上端へ寄せる。
+    let y = this.comboLink ? l.boardY + l.cell * 0.12 : cy - total / 2;
     visible.forEach((r, i) => {
       r.t.setPosition(cx, y + r.t.displayHeight / 2);
       y += r.t.displayHeight + (i < visible.length - 1 ? r.gap * l.cell : 0);
     });
+
+    // 「タップで つづける」は盤面の外（盤面とトレイのすき間）へ。盤面を隠さない。
+    this.teachPromptText.setFontSize(Math.max(9, Math.round(l.cell * 0.34)));
+    this.fitToBoard(this.teachPromptText);
+    this.teachPromptText.setPosition(cx, (l.boardY + l.boardH + l.trayY) / 2);
 
     // 予告は盤面ではなく専用ストリップの中央へ置く。
     this.previewText.setFontSize(Math.max(9, Math.round(l.stripH * 0.62)));
@@ -248,8 +283,46 @@ export class GameScene extends Phaser.Scene {
   }
 
   private hideCenterTexts(): void {
-    for (const t of [this.comboNameText, this.comboTagText, this.comboNoteText, this.chainText, this.chainNoteText])
+    for (const t of [this.comboNameText, this.comboNoteText, this.chainText, this.chainNoteText, this.teachPromptText])
       t.setAlpha(0);
+  }
+
+  /** wave 番号と combo の結び付けを消す。次の手へ持ち越さない。 */
+  private resetTeachVisuals(): void {
+    this.waveBadges = [];
+    this.comboLink = null;
+    this.teachHold = null;
+    if (this.badgeTexts.length > 0) for (const t of this.badgeTexts) t.setAlpha(0);
+  }
+
+  /** wave 番号の丸数字をセルの上へ載せ直す。 */
+  private syncBadgeTexts(): void {
+    const l = this.layout;
+    this.badgeTexts.forEach((t, i) => {
+      const b = this.waveBadges[i];
+      if (!b || !l) {
+        t.setAlpha(0);
+        return;
+      }
+      t.setText(waveMark(b.wave));
+      t.setFontSize(Math.max(10, Math.round(l.cell * 0.52)));
+      t.setPosition(this.cellX(b.index) + l.cell / 2, this.cellY(b.index) + l.cell / 2);
+      t.setAlpha(1);
+    });
+  }
+
+  /** そのセルたちの重心にいちばん近いマス。 */
+  private centroidIndex(cells: readonly number[]): number | null {
+    if (cells.length === 0) return null;
+    let r = 0;
+    let c = 0;
+    for (const i of cells) {
+      r += this.view.rowOf(i);
+      c += this.view.colOf(i);
+    }
+    const row = Math.round(r / cells.length);
+    const col = Math.round(c / cells.length);
+    return this.view.idx(row, col);
   }
 
   private refreshHint(): void {
@@ -376,6 +449,7 @@ export class GameScene extends Phaser.Scene {
   /** resolution 中はユーザー入力を無効化する。 */
   private playResolution(result: ResolutionResult): void {
     this.busy = true;
+    this.resetTeachVisuals();
     let t = TIMING.snap;
 
     for (const ev of result.events) {
@@ -386,12 +460,37 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.time.delayedCall(t, () => {
-      this.busy = false;
       this.chainNow = 0;
-      this.hideCenterTexts();
       this.syncView();
+
+      // 教材の山場（①→② が出そろった／特殊が結ばれた）が起きた手だけ、
+      // 読み終わるまで止める。**そのステージで 1 回だけ**なのでテンポは落ちない。
+      const moment = this.waveBadges.length >= 2 || this.comboLink !== null;
+      if (moment && !this.teachHeld) {
+        this.teachHeld = true;
+        this.teachPromptText.setText(TEACH_PROMPT).setAlpha(1);
+        this.layoutCenterTexts();
+        this.teachHold = () => {
+          this.teachHold = null;
+          this.busy = false;
+          this.hideCenterTexts();
+          this.resetTeachVisuals();
+          this.finishTurn();
+        };
+        this.emit();
+        return;
+      }
+
+      this.busy = false;
+      this.hideCenterTexts();
+      this.resetTeachVisuals();
       this.finishTurn();
     });
+  }
+
+  /** 教材の一時停止中か（自動確認から読むため）。 */
+  get isAwaitingTeach(): boolean {
+    return this.teachHold !== null;
   }
 
   private showLines(ev: ResolutionEvent): void {
@@ -406,16 +505,33 @@ export class GameScene extends Phaser.Scene {
     }
     // COMBO と CHAIN は別概念。何を出すかは waveNotice が wave 単位で決める
     // （ここで盤面を見たり combo を判定し直したりしない）。
-    const notice = waveNotice(ev);
+    const notice = waveNotice(ev, this.teach);
     const line = (t: Phaser.GameObjects.Text, text: string | null) => {
       t.setText(text ?? '');
       t.setAlpha(text ? 1 : 0);
     };
     line(this.comboNameText, notice.comboName);
-    line(this.comboTagText, notice.comboName ? 'COMBO!' : null);
     line(this.comboNoteText, notice.comboNote);
     line(this.chainText, notice.chainLabel);
-    line(this.chainNoteText, notice.chainNote);
+    // combo を結ぶ線を出すステージでは CHAIN の言い換えまでは出さない。
+    // 行数が増えると盤面を覆ってしまい、肝心の「結ばれた 2 個」が見えなくなる。
+    line(this.chainNoteText, this.teach.includes('comboLink') ? null : notice.chainNote);
+
+    // 盤面上の教材表示。**この wave で実際に起きたことだけ**を記録する。
+    if (this.teach.includes('waveNumbers')) {
+      // 1 wave = 番号 1 個。2 ライン同時に消えても ① のまま（CHAIN の数と混同させない）。
+      const cells =
+        ev.detonations.length > 0
+          ? ev.detonations.flatMap((d) => [...d.cells])
+          : ev.lines.flatMap((li) => [...this.view.lineIndices(li)]);
+      const at = this.centroidIndex(cells);
+      if (at !== null) this.waveBadges.push({ index: at, wave: ev.chainIndex });
+      this.syncBadgeTexts();
+    }
+    if (this.teach.includes('comboLink')) {
+      const d = ev.detonations.find((x) => x.group.length >= 2);
+      if (d) this.comboLink = { specials: [...d.group] };
+    }
     this.layoutCenterTexts();
     this.emit();
   }
@@ -494,6 +610,9 @@ export class GameScene extends Phaser.Scene {
       for (const i of f.cells) g.fillRect(this.cellX(i), this.cellY(i), l.cell, l.cell);
     }
 
+    // 盤面上の教材表示（wave 番号 / combo の結び付け / KEEP 印）
+    this.drawTeach(g);
+
     // ドラッグ予告（起爆・combo）→ その上にゴースト
     this.drawPreview(g);
     this.drawGhost(g);
@@ -525,8 +644,9 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(UI.textPlate, 0.82);
       g.fillRect(x0 - pad, y0 - pad, x1 - x0 + pad * 2, y1 - y0 + pad * 2);
     };
-    plate([this.comboNameText, this.comboTagText, this.comboNoteText]);
+    plate([this.comboNameText, this.comboNoteText]);
     plate([this.chainText, this.chainNoteText]);
+    plate([this.teachPromptText]);
     if (this.previewText.alpha > 0) {
       // **専用ストリップの中だけ**を塗る。盤面セルへは 1px も重ねない。
       const l = this.layout;
@@ -535,6 +655,172 @@ export class GameScene extends Phaser.Scene {
       g.fillStyle(UI.textPlate, 0.86);
       g.fillRect(t.x - w / 2, l.stripY, w, l.stripH);
     }
+  }
+
+  /**
+   * **盤面の上でルールを見せる。** 文章ではなく、番号・枠・矢印で示す。
+   *   waveNumbers … ① ② と wave に番号を振る。1 wave = 1 個
+   *   comboLink   … いっしょに起爆した特殊を同じ枠で囲み、矢印で結ぶ
+   *   keep        … 残す特殊へ印を付け、組み合わせ相手を小さな図で示す
+   * どれを出すかはステージデータの tutorial.teach だけが決める。
+   */
+  private drawTeach(g: Phaser.GameObjects.Graphics): void {
+    const l = this.layout;
+    const now = this.time.now;
+
+    // --- wave 番号。CHAIN の文字と同じ色にして盤面と中央表示を対応づける ---
+    const at = (i: number) => ({ x: this.cellX(i) + l.cell / 2, y: this.cellY(i) + l.cell / 2 });
+    for (let i = 1; i < this.waveBadges.length; i++) {
+      this.arrow(g, at(this.waveBadges[i - 1]!.index), at(this.waveBadges[i]!.index), UI.lineHighlight, 0.85);
+    }
+    for (const b of this.waveBadges) {
+      const c = at(b.index);
+      const r = l.cell * 0.33;
+      g.fillStyle(UI.lineHighlight, 0.95);
+      g.fillCircle(c.x, c.y, r);
+      g.lineStyle(Math.max(2, l.cell * 0.06), UI.textPlate, 0.85);
+      g.strokeCircle(c.x, c.y, r);
+    }
+
+    // --- COMBO。2 個を同じ枠・同じ色・同じ脈動で結ぶ ---
+    if (this.comboLink) {
+      const pulse = 0.5 + 0.5 * Math.abs(Math.sin(now / 260));
+      const sp = this.comboLink.specials;
+      for (let i = 1; i < sp.length; i++) this.arrow(g, at(sp[i - 1]!.index), at(sp[i]!.index), UI.previewCombo, pulse);
+      for (const x of sp) {
+        const px = this.cellX(x.index);
+        const py = this.cellY(x.index);
+        // すでに消えた側は残像で位置を示す。どれとどれが結ばれたのかを見せるため。
+        if (this.view.at(x.index).kind === 'empty')
+          this.drawCell(g, px, py, l.cell, { kind: x.kind, color: x.color, dir: x.dir, uid: x.uid }, 0.55);
+        g.lineStyle(Math.max(3, l.cell * 0.12), UI.previewCombo, pulse);
+        g.strokeRect(px + 2, py + 2, l.cell - 4, l.cell - 4);
+      }
+    }
+
+    // --- KEEP。考える時間のあいだだけ出す（演出中は出さない） ---
+    if (this.teach.includes('keep') && !this.busy) this.drawKeep(g);
+    else this.keepLabelText.setAlpha(0);
+  }
+
+  /** 残す特殊の印と、「これと もう1個 で COMBO」の小さな図。 */
+  private drawKeep(g: Phaser.GameObjects.Graphics): void {
+    const l = this.layout;
+    const kept = this.view.specialIndices();
+    if (kept.length === 0) {
+      this.keepLabelText.setAlpha(0);
+      return;
+    }
+    const pulse = 0.5 + 0.5 * Math.sin(this.time.now / 520); // 弱い脈動
+
+    // 盤面に残っている特殊へ、四隅のブラケット（盾）と薄い塗り。アイコンは隠さない。
+    for (const i of kept) {
+      const x = this.cellX(i);
+      const y = this.cellY(i);
+      const m = l.cell * 0.08;
+      const arm = l.cell * 0.28;
+      g.fillStyle(UI.hint, 0.08 + 0.06 * pulse);
+      g.fillRect(x + m, y + m, l.cell - m * 2, l.cell - m * 2);
+      g.lineStyle(Math.max(2, l.cell * 0.08), UI.hint, 0.55 + 0.3 * pulse);
+      const x0 = x + m;
+      const y0 = y + m;
+      const x1 = x + l.cell - m;
+      const y1 = y + l.cell - m;
+      g.lineBetween(x0, y0, x0 + arm, y0); g.lineBetween(x0, y0, x0, y0 + arm);
+      g.lineBetween(x1, y0, x1 - arm, y0); g.lineBetween(x1, y0, x1, y0 + arm);
+      g.lineBetween(x0, y1, x0 + arm, y1); g.lineBetween(x0, y1, x0, y1 - arm);
+      g.lineBetween(x1, y1, x1 - arm, y1); g.lineBetween(x1, y1, x1, y1 - arm);
+    }
+
+    // 「[残す特殊] ＋ [もう1個] → COMBO」。相手の種類は決めつけず、
+    // まだ無ければ点線の枠にする（作るべきものが 1 個ある、とだけ伝える）。
+    const row = this.emptyRowForDiagram();
+    if (row === null) {
+      this.keepLabelText.setAlpha(0);
+      return;
+    }
+    const icon = l.cell * 0.78;
+    const gap = l.cell * 0.26;
+    const plusW = l.cell * 0.3;
+    const arrowW = l.cell * 0.62;
+    const size = Math.max(10, Math.round(l.cell * 0.42));
+    if (this.keepLabelText.style.fontSize !== `${size}px`) this.keepLabelText.setFontSize(size);
+    this.keepLabelText.setText('COMBO');
+    const total = icon + gap + plusW + gap + icon + gap + arrowW + gap + this.keepLabelText.width;
+    let x = l.boardX + (l.boardW - total) / 2;
+    const y = l.boardY + row * l.cell + (l.cell - icon) / 2;
+    const midY = y + icon / 2;
+
+    const first = this.view.at(kept[0]!);
+    this.drawCell(g, x, y, icon, first, 1);
+    x += icon + gap;
+    g.fillStyle(UI.hint, 0.9); // ＋
+    g.fillRect(x, midY - plusW * 0.09, plusW, plusW * 0.18);
+    g.fillRect(x + plusW * 0.41, midY - plusW / 2, plusW * 0.18, plusW);
+    x += plusW + gap;
+    const partner = kept.length > 1 ? this.view.at(kept[1]!) : null;
+    if (partner) this.drawCell(g, x, y, icon, partner, 1);
+    else {
+      // まだ作っていない相手。点線ふうの枠だけ。
+      g.lineStyle(Math.max(2, icon * 0.09), UI.hint, 0.5 + 0.3 * pulse);
+      const step = icon / 7;
+      for (let k = 0; k < 7; k += 2) {
+        g.lineBetween(x + k * step, y, x + (k + 1) * step, y);
+        g.lineBetween(x + k * step, y + icon, x + (k + 1) * step, y + icon);
+        g.lineBetween(x, y + k * step, x, y + (k + 1) * step);
+        g.lineBetween(x + icon, y + k * step, x + icon, y + (k + 1) * step);
+      }
+    }
+    x += icon + gap;
+    this.arrow(g, { x: x - l.cell * 0.42, y: midY }, { x: x + arrowW + l.cell * 0.42, y: midY }, UI.hint, 0.9);
+    x += arrowW + gap;
+    this.keepLabelText.setPosition(x + this.keepLabelText.width / 2, midY);
+    this.keepLabelText.setAlpha(0.95);
+  }
+
+  /** 小さな図を置ける、いちばん上の空き行。無ければ null。 */
+  private emptyRowForDiagram(): number | null {
+    const rows: number[] = [];
+    for (let r = 0; r < this.view.rows; r++) {
+      let empty = true;
+      for (let c = 0; c < this.view.cols; c++) if (this.view.get(r, c).kind !== 'empty') empty = false;
+      if (empty) rows.push(r);
+    }
+    if (rows.length === 0) return null;
+    // 盤面の上端に貼りつかないよう、空き行が続くなら 2 行目を使う。
+    return rows.length > 1 && rows[1] === rows[0]! + 1 ? rows[1]! : rows[0]!;
+  }
+
+  /** from → to の矢印。セル中心どうしを結ぶので、両端をセル半分ぶん詰める。 */
+  private arrow(
+    g: Phaser.GameObjects.Graphics,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    color: number,
+    alpha: number,
+  ): void {
+    const l = this.layout;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) return;
+    const ux = dx / len;
+    const uy = dy / len;
+    const pad = l.cell * 0.42;
+    const x0 = from.x + ux * pad;
+    const y0 = from.y + uy * pad;
+    const x1 = to.x - ux * pad;
+    const y1 = to.y - uy * pad;
+    if (Math.hypot(x1 - x0, y1 - y0) < 4) return;
+    g.lineStyle(Math.max(2, l.cell * 0.07), color, alpha);
+    g.lineBetween(x0, y0, x1, y1);
+    const hh = l.cell * 0.2;
+    g.fillStyle(color, alpha);
+    g.fillTriangle(
+      x1, y1,
+      x1 - ux * hh - uy * hh * 0.55, y1 - uy * hh + ux * hh * 0.55,
+      x1 - ux * hh + uy * hh * 0.55, y1 - uy * hh - ux * hh * 0.55,
+    );
   }
 
   private cellX(index: number): number {

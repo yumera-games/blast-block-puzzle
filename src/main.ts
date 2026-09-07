@@ -252,6 +252,8 @@ window.__blast = {
       moves: s.moves,
       maxChain: s.maxChain,
       busy: scene.isBusy,
+      /** 教材表示を読ませるために止まっているか（自動確認はタップで進める）。 */
+      awaitingTeach: scene.isAwaitingTeach,
       board: s.board.toStrings(),
       tray: s.tray.map((p) => p && { shape: p.shape.id, color: p.color }),
       objectives: s.objectiveProgress().map((o) => ({ label: o.objective.label, current: o.current, target: o.target })),

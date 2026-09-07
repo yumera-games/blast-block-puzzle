@@ -291,16 +291,15 @@ describe('意図したルールが実際に発生する', () => {
     const t = stageById(11).tutorial;
     expect(t.showGuide).toBe(true);
     expect(t.hints?.length).toBe(3);
-    // 「なぜ残すか」を 1 組の因果として出す（Stage 5・8・9 の「起爆させる」と逆なので）
+    // 文章は読み流されると分かったので短くし、意味は盤面上の KEEP 表示で見せる。
+    expect(t.teach).toEqual(['keep']);
     expect(t.intro).toContain('残そう');
     expect(t.intro).toContain('いっしょに 起爆');
-    expect(t.intro).toContain('COMBO');
-    expect(t.outro).toContain('COMBO');
-    // ROCKET 生成後のヒントでも「そのまま残す」と「矢印を届かせる」が読める
+    expect(t.outro).toContain('いっしょに 起爆');
     const hints = t.hints ?? [];
-    expect(hints[0]?.text).toContain('BOMBは 残す');
-    expect(hints[1]?.text).toContain('BOMBは そのまま');
-    expect(hints[2]?.text).toContain('届かせよう');
+    expect(hints[0]?.text).toBe('BOMBは 残す');
+    expect(hints[1]?.text).toBe('BOMBは 残す');
+    expect(hints[2]?.text).toContain('BOMBへ');
   });
 
   it('Stage 12 には Stage 11 の「残す」説明もヒントも出ない', () => {

@@ -1,5 +1,6 @@
 import type { Color, PieceSpec, SpecialKind } from '../game/types';
 import type { ComboEffect } from './combos';
+import type { TeachKind } from './resultText';
 
 /* ==========================================================================
    ステージデータ
@@ -54,6 +55,11 @@ export interface StageTutorial {
   /** 推奨配置セルを常時表示するか（Stage 1〜3 のみ true）。 */
   readonly showGuide: boolean;
   readonly hints?: readonly TutorialHint[];
+  /**
+   * **盤面上の教材表示。** 文章ではなく動きでルールを見せる。
+   * 指定したステージでだけ出る。転移確認ステージには付けない。
+   */
+  readonly teach?: readonly TeachKind[];
 }
 
 export interface StageDef {
@@ -214,15 +220,12 @@ export const STAGES: readonly StageDef[] = [
         'ROCKET が 入っている ラインを そろえると、巻きこまれて 起爆します。\n' +
         '\n' +
         '盤面の 上の 帯に「起爆」と 出たら、その置き方で 特殊が 起爆します。',
-      outro:
-        'いま 起きたこと\n' +
-        '\n' +
-        'wave 1  行が そろって 消え、ROCKET が 巻きこまれた\n' +
-        'wave 2  ROCKET が たてに 飛び、その列が 消えた\n' +
-        '\n' +
-        '解決が 何波 続いたか、それが CHAIN です。だから CHAIN 2。\n' +
-        '起爆した 特殊が 1個だけでも CHAIN は 起きます。',
+      // 長い説明は読み流されると分かったので 1 行だけ。意味は盤面の ①② が見せる。
+      outro: '① ライン消去 → ② ROCKET 起爆。つづいた回数が CHAIN。',
       showGuide: true,
+      // wave に ①② と番号を振る。2 ライン同時消しでも番号は 1 つなので、
+      //「2列そろった＝CHAIN 2」という取り違えが起きない。
+      teach: ['waveNumbers'],
       hints: [
         { move: 0, pieceIndex: 0, row: 6, col: 7, text: 'この1手で 下の 2行が 同時に そろいます' },
         { move: 1, pieceIndex: 1, row: 6, col: 0, text: 'ROCKET と 同じ行を うめていきます' },
@@ -422,18 +425,12 @@ export const STAGES: readonly StageDef[] = [
         'これが COMBO です。\n' +
         '\n' +
         'ドラッグ中に 出る 予告で、どこへ 届くかを 確かめられます。',
-      outro:
-        'いま 起きたこと\n' +
-        '\n' +
-        'wave 1  行が 消えて ROCKET が 巻きこまれた（起爆した 特殊は 1個）\n' +
-        'wave 2  ROCKET の 射線が BOMB へ 届き、2個が いっしょに 起爆した\n' +
-        '\n' +
-        'CHAIN は 2。COMBO は 1回。\n' +
-        '\n' +
-        'Stage 5 も CHAIN 2 でしたが、特殊は 1個なので COMBO なし。\n' +
-        'ここは 特殊が 2個 いっしょに 起爆したので COMBO あり。\n' +
-        'CHAIN の 数と COMBO の 有無は 別に 数えます。',
+      // 結び付けは盤面の枠と矢印が見せる。文章は 1 行だけ。
+      outro: 'ROCKET の 効果が BOMB へ 届き、2個 いっしょに 起爆した。これが COMBO。',
       showGuide: true,
+      // 起爆した ROCKET と BOMB を同じ色の枠と矢印で結ぶ。
+      // 「COMBO を取った」ではなく「この 2 個が いっしょに起爆した」を見せる。
+      teach: ['comboLink'],
       hints: [
         { move: 0, pieceIndex: 0, row: 7, col: 2, text: 'この行が そろうと ROCKET が 巻きこまれます' },
       ],
@@ -478,24 +475,17 @@ export const STAGES: readonly StageDef[] = [
     ],
     objectives: [{ kind: 'combo', target: 1, label: 'BOMBを残して 2個同時起爆' }],
     tutorial: {
-      intro:
-        'BOMBを 今は 消さずに 残そう。\n' +
-        'あとで ROCKETと いっしょに 起爆すると COMBOに なるよ。\n' +
-        '\n' +
-        'COMBO＝特殊が 2個以上 いっしょに 起爆すること。\n' +
-        'BOMBを 先に 1個だけ 消してしまうと、相手が 居なくなる。',
-      outro:
-        'BOMB を 残して おいたので、ROCKET の 射線が 届き、\n' +
-        '2個が いっしょに 起爆しました。これが COMBO です。\n' +
-        '\n' +
-        '先に BOMB だけを 消していたら、相手が 居ません。\n' +
-        'その場合 CHAIN は 起きても COMBO には なりません。',
+      intro: 'BOMBは 今は 消さずに 残そう。\n' + 'あとで もう1個 特殊を 作って、いっしょに 起爆させる。',
+      outro: 'BOMBを 残しておいたので、2個 いっしょに 起爆できた。',
       showGuide: true,
       hints: [
-        { move: 0, pieceIndex: 0, row: 6, col: 3, text: 'BOMBは 残す。下の 2行を 同時に そろえよう' },
-        { move: 1, pieceIndex: 1, row: 6, col: 0, text: 'BOMBは そのまま。ROCKETの 行を うめよう' },
-        { move: 2, pieceIndex: 2, row: 6, col: 4, text: 'ROCKETの 矢印を BOMBへ 届かせよう' },
+        { move: 0, pieceIndex: 0, row: 6, col: 3, text: 'BOMBは 残す' },
+        { move: 1, pieceIndex: 1, row: 6, col: 0, text: 'BOMBは 残す' },
+        { move: 2, pieceIndex: 2, row: 6, col: 4, text: 'ROCKETの 矢印を BOMBへ' },
       ],
+      // BOMB に KEEP 印を付け、組み合わせ相手を小さな図で示す。
+      // 正解セルを常時光らせるのではなく「今は消さない」という考え方のほうを見せる。
+      teach: ['keep'],
     },
   },
 

@@ -276,8 +276,24 @@ const SOLUTIONS = {
   12: [[0, 0, 3], [1, 0, 0], [2, 0, 4]],
 };
 
+/** 教材の一時停止（タップ待ち）を見つけたら 1 回タップして進める。 */
+let teachHeldAt = [];
 async function waitIdle() {
-  await page.waitForFunction(() => !window.__blast.state().busy, null, { timeout: 8000 });
+  await page.waitForFunction(
+    () => { const s = window.__blast.state(); return !s.busy || s.awaitingTeach; },
+    null,
+    { timeout: 8000 },
+  );
+  if (await page.evaluate(() => window.__blast.state().awaitingTeach)) {
+    teachHeldAt.push(await page.evaluate(() => window.__blast.state().stage));
+    const box = await page.evaluate(() => {
+      const r = document.querySelector('#game canvas').getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await page.mouse.click(box.x, box.y);
+    await page.waitForTimeout(80);
+    await page.waitForFunction(() => !window.__blast.state().busy, null, { timeout: 8000 });
+  }
 }
 
 async function closeCard() {
@@ -289,6 +305,7 @@ async function closeCard() {
 }
 
 const played = [];
+teachHeldAt = [];
 for (let id = 1; id <= 12; id++) {
   await page.evaluate((n) => window.__blast.goStage(n), id);
   await page.waitForTimeout(200);
@@ -347,6 +364,14 @@ for (let id = 1; id <= 12; id++) {
   await closeCard();
 }
 note.push(...played);
+
+// 盤面上の教材表示。読ませるために止まるのは教材ステージだけで、転移確認ステージでは止まらない。
+const heldSet = [...new Set(teachHeldAt)].sort((a, b) => a - b);
+for (const id of [5, 10]) if (!heldSet.includes(id)) ng.push(`Stage ${id}: 教材表示の一時停止が出ていない`);
+for (const id of [1, 2, 3, 4, 6, 7, 8, 9, 11, 12]) {
+  if (heldSet.includes(id)) ng.push(`Stage ${id}: 教材表示の一時停止が出てはいけない`);
+}
+note.push(`  盤面上の教材で一時停止したステージ: ${heldSet.join(', ') || 'なし'}（Stage 12 は含まれない）`);
 
 // リトライできる
 await page.evaluate(() => window.__blast.goStage(1));
