@@ -87,13 +87,75 @@ describe('プレイ計測（メモリ上のみ）', () => {
     expect(parse(m)[0]!.illegalDrops).toBe(2);
   });
 
-  it('同じ候補セルの予告は 1 回だけ数える', () => {
+  it('同じ候補セルを 5 回見ても 1 件', () => {
     const m = new PlayMetrics();
     const st = new StageState(stageById(11));
     m.begin(11, false);
     const pv = previewPlacement(st.board, st.tray[0]!, 6, 3);
     for (let i = 0; i < 5; i++) m.onPreview('0:6:3', pv);
     expect(parse(m)[0]!.previewsShown).toBe(1);
+  });
+
+  it('予告の内容が同じでも、別の座標なら別件として数える', () => {
+    const m = new PlayMetrics();
+    const st = new StageState(stageById(1));
+    m.begin(1, false);
+    // どちらもラインが完成せず起爆も無い＝内容は同一だが、座標が違う
+    const a = previewPlacement(st.board, st.tray[0]!, 0, 0)!;
+    const b = previewPlacement(st.board, st.tray[0]!, 0, 1)!;
+    expect(a.effect).toBe(b.effect);
+    expect(a.triggerCells).toEqual(b.triggerCells);
+    expect(a.lineCells).toEqual(b.lineCells);
+
+    m.onPreview('0:0:0', a);
+    m.onPreview('0:0:1', b);
+    expect(parse(m)[0]!.previewsShown).toBe(2);
+  });
+
+  it('同じ row/col でも trayIndex が違えば別件', () => {
+    const m = new PlayMetrics();
+    const st = new StageState(stageById(1));
+    m.begin(1, false);
+    m.onPreview('0:0:0', previewPlacement(st.board, st.tray[0]!, 0, 0));
+    m.onPreview('1:0:0', previewPlacement(st.board, st.tray[1]!, 0, 0));
+    expect(parse(m)[0]!.previewsShown).toBe(2);
+  });
+
+  it('retry 後は同じ座標をふたたび 1 件として数え直す', () => {
+    const m = new PlayMetrics();
+    const st = new StageState(stageById(11));
+    const pv = previewPlacement(st.board, st.tray[0]!, 6, 3);
+
+    m.begin(11, false);
+    m.onPreview('0:6:3', pv);
+    m.onPreview('0:6:3', pv);
+    m.begin(11, true); // retry
+    m.onPreview('0:6:3', pv);
+    m.onPreview('0:6:3', pv);
+
+    const all = parse(m);
+    expect(all.length).toBe(2);
+    expect(all[0]!.previewsShown).toBe(1);
+    expect(all[1]!.previewsShown).toBe(1);
+    expect(all[1]!.retry).toBe(1);
+  });
+
+  it('combo 予告も座標別に数える', () => {
+    const m = new PlayMetrics();
+    const st = new StageState(stageById(11));
+    st.place(0, 6, 3);
+    st.place(1, 6, 0);
+    m.begin(11, false);
+    const combo = previewPlacement(st.board, st.tray[2]!, 6, 4)!;
+    const plain = previewPlacement(st.board, st.tray[2]!, 0, 0)!;
+    expect(combo.effect).toBe('rocket+bomb');
+    expect(plain.effect).toBeNull();
+
+    for (let i = 0; i < 3; i++) m.onPreview('2:6:4', combo); // 同じ座標なので 1 件
+    m.onPreview('2:0:0', plain);
+    const a = parse(m)[0]!;
+    expect(a.previewsShown).toBe(2);
+    expect(a.comboPreviewsShown).toBe(1);
   });
 
   it('計測はゲームロジックへ影響しない（同じ手順なら結果が完全に一致する）', () => {

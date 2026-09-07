@@ -32,7 +32,8 @@ export interface SceneHooks {
   /** クリア / 失敗が確定したとき。 */
   onStageEnd(state: StageState): void;
   /** 以下は計測用の任意フック。ゲーム進行には影響しない。 */
-  onPreview?(preview: PreviewResult | null): void;
+  /** `key` は `trayIndex:row:col`。**候補セル単位**で数えるためにシーン側が作る。 */
+  onPreview?(key: string, preview: PreviewResult | null): void;
   onPlaced?(state: StageState, result: ResolutionResult | null, shownPreview: PreviewResult | null): void;
   onIllegalDrop?(): void;
 }
@@ -105,7 +106,7 @@ export class GameScene extends Phaser.Scene {
     this.chainText = centered('#ffd166');
     this.previewText = this.add
       .text(0, 0, '', { fontFamily: 'ui-monospace, monospace', fontStyle: 'bold', color: '#cfe6ff' })
-      .setOrigin(0.5, 0)
+      .setOrigin(0.5, 0.5)
       .setAlpha(0);
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onDown(p));
@@ -198,8 +199,19 @@ export class GameScene extends Phaser.Scene {
     this.comboNameText.setPosition(cx, cy - l.cell * 1.05);
     this.comboTagText.setPosition(cx, cy - l.cell * 0.4);
     this.chainText.setPosition(cx, combo ? cy + l.cell * 0.5 : cy);
-    this.previewText.setFontSize(Math.round(l.cell * 0.42));
-    this.previewText.setPosition(cx, l.boardY + l.cell * 0.22);
+    // 予告は盤面ではなく専用ストリップの中央へ置く。
+    this.previewText.setFontSize(Math.max(9, Math.round(l.stripH * 0.62)));
+    this.previewText.setPosition(cx, l.stripY + l.stripH / 2);
+    this.fitPreviewText();
+  }
+
+  /** 長いラベルでも canvas 外へはみ出さないよう、盤面幅に収まるまで縮める。 */
+  private fitPreviewText(): void {
+    const l = this.layout;
+    this.previewText.setScale(1);
+    const maxW = l.boardW - l.cell * 0.3;
+    const w = this.previewText.width;
+    if (w > maxW && w > 0) this.previewText.setScale(maxW / w);
   }
 
   private hideCenterTexts(): void {
@@ -285,7 +297,7 @@ export class GameScene extends Phaser.Scene {
     // 盤面の clone に対する純粋関数。本番の StageState・RNG・uid・トレイを一切触らない。
     const result = previewPlacement(this.state.board, piece, target.row, target.col);
     this.preview = { key, result };
-    this.hooks.onPreview?.(result);
+    this.hooks.onPreview?.(key, result);
     return result;
   }
 
@@ -484,9 +496,12 @@ export class GameScene extends Phaser.Scene {
       g.fillRect(x0 - pad, y0 - pad, x1 - x0 + pad * 2, y1 - y0 + pad * 2);
     }
     if (this.previewText.alpha > 0) {
+      // **専用ストリップの中だけ**を塗る。盤面セルへは 1px も重ねない。
+      const l = this.layout;
       const t = this.previewText;
+      const w = Math.min(t.displayWidth + pad * 2, l.boardW);
       g.fillStyle(UI.textPlate, 0.86);
-      g.fillRect(t.x - t.width / 2 - pad, t.y - pad * 0.5, t.width + pad * 2, t.height + pad);
+      g.fillRect(t.x - w / 2, l.stripY, w, l.stripH);
     }
   }
 
@@ -542,10 +557,12 @@ export class GameScene extends Phaser.Scene {
       this.previewText.setText(label);
       this.previewText.setColor('#ff9ede');
       this.previewText.setAlpha(1);
+      this.fitPreviewText();
     } else if (pv.triggerCells.length > 0) {
       this.previewText.setText('起爆');
       this.previewText.setColor('#cfe6ff');
       this.previewText.setAlpha(1);
+      this.fitPreviewText();
     } else {
       this.previewText.setAlpha(0);
     }

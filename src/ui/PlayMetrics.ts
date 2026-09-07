@@ -23,9 +23,9 @@ export interface AttemptMetrics {
   firstComboAtMove: number | null;
   /** 特殊ごとの「生成から起爆までの手数」。 */
   specialLifetimes: number[];
-  /** 予告を出した候補セル数（同じセルは 1 回だけ数える）。 */
+  /** 予告を出した候補セル数。キーは `trayIndex:row:col` で、同じ候補は 1 回だけ数える。 */
   previewsShown: number;
-  /** そのうち combo 予告だったもの。 */
+  /** そのうち combo 予告だった候補セル数。 */
   comboPreviewsShown: number;
   /** combo 予告を見て、その配置をそのまま選んだか。 */
   choseAfterComboPreview: boolean;
@@ -60,7 +60,11 @@ export class PlayMetrics {
     if (this.current) this.current.illegalDrops++;
   }
 
-  /** 予告を出したとき。同じ候補セルの再表示は数えない（呼び出し側でセルが変わったときだけ呼ぶ）。 */
+  /**
+   * 予告を出したとき。`key` は `trayIndex:row:col`。
+   * **同じ候補セルは何度見ても 1 件**。内容が同じでも座標が違えば別件。
+   * 既読集合は begin() で作り直すので retry のたびに数え直しになる。
+   */
   onPreview(key: string, preview: PreviewResult | null): void {
     const c = this.current;
     if (!c) return;

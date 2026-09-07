@@ -7,6 +7,9 @@ import { BALANCE } from '../data/balance';
 export interface Layout {
   readonly dpr: number;
   readonly cell: number;
+  /** ドラッグ予告ラベル専用の帯。**盤面より上**に確保し、盤面セルへは絶対に重ねない。 */
+  readonly stripY: number;
+  readonly stripH: number;
   readonly boardX: number;
   readonly boardY: number;
   readonly boardW: number;
@@ -20,13 +23,18 @@ export interface Layout {
   readonly cssHeight: number;
 }
 
+/** 予告ストリップの高さ（セル比）。盤面の上に置く専用領域。 */
+const STRIP_RATIO = 0.62;
+/** 予告ストリップと盤面のすき間（セル比）。 */
+const STRIP_GAP_RATIO = 0.1;
 /** 盤面の下の余白（セル比）。 */
 const GAP_RATIO = 0.42;
 /** トレイの高さ（セル比）。縦に長いピースがつぶれない程度に確保する。 */
 const TRAY_RATIO = 2.3;
 const PAD_RATIO = 0.12;
 
-export const LAYOUT_UNITS = BALANCE.board.rows + GAP_RATIO + TRAY_RATIO + PAD_RATIO * 2;
+export const LAYOUT_UNITS =
+  STRIP_RATIO + STRIP_GAP_RATIO + BALANCE.board.rows + GAP_RATIO + TRAY_RATIO + PAD_RATIO * 2;
 
 /**
  * 使える CSS ピクセル領域から寸法を決める。
@@ -43,18 +51,24 @@ export function computeLayout(availCssW: number, availCssH: number, dpr: number)
   const pad = Math.round(cell * PAD_RATIO);
   const gap = Math.round(cell * GAP_RATIO);
   const trayH = Math.round(cell * TRAY_RATIO);
+  const stripH = Math.round(cell * STRIP_RATIO);
+  const stripGap = Math.round(cell * STRIP_GAP_RATIO);
 
   const boardW = cols * cell;
   const boardH = rows * cell;
   const width = boardW + pad * 2;
   const boardX = pad;
-  const boardY = pad;
+  // 予告ストリップ → 盤面 → すき間 → トレイ の順。予告の有無で盤面位置は動かさない。
+  const stripY = pad;
+  const boardY = stripY + stripH + stripGap;
   const trayY = boardY + boardH + gap;
   const height = trayY + trayH + pad;
 
   return {
     dpr,
     cell,
+    stripY,
+    stripH,
     boardX,
     boardY,
     boardW,

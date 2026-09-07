@@ -39,8 +39,10 @@ const hooks: SceneHooks = {
     hud.update(state, chainNow, shown);
     debug.render({ state, lastResult: state.lastResult, chainNow, fps: Math.round(game.loop.actualFps) });
   },
-  onPreview(preview) {
-    metrics.onPreview(previewKey(preview), preview);
+  onPreview(key, preview) {
+    // キーはシーンが作った `trayIndex:row:col` をそのまま使う。
+    // 予告の内容から作り直すと、別の座標が同じ 1 件にまとめられてしまう。
+    metrics.onPreview(key, preview);
   },
   onPlaced(state, result, shownPreview) {
     metrics.onPlaced(state, result, shownPreview);
@@ -71,11 +73,6 @@ const debug = new DebugPanel(
   () => metrics.toJSON(),
 );
 
-/** 予告の同一性キー。同じ候補セルを何度も数えないためだけに使う。 */
-function previewKey(p: { triggerCells: readonly number[]; comboCells: readonly number[]; effect: string | null } | null): string {
-  if (!p) return 'none';
-  return `${p.triggerCells.join(',')}|${p.comboCells.join(',')}|${p.effect ?? '-'}`;
-}
 
 const game = new Phaser.Game({
   type: Phaser.CANVAS, // Gray Box は矩形だけなので CANVAS で十分（依存を減らす）
