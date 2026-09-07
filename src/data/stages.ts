@@ -406,7 +406,7 @@ export const STAGES: readonly StageDef[] = [
     ],
     fixedSets: [[p('dot', 'green'), p('dot', 'purple'), p('dot', 'red')]],
     objectives: [
-      { kind: 'combo', target: 1, effect: 'rocket+bomb', label: 'ROCKET と BOMB を いっしょに起爆（COMBO）' },
+      { kind: 'combo', target: 1, effect: 'rocket+bomb', label: 'ROCKET＋BOMB 同時起爆' },
     ],
     tutorial: {
       intro:
@@ -476,7 +476,7 @@ export const STAGES: readonly StageDef[] = [
       // 立て直し用。1 セット目と同じ 3 種類なので、v2 を無駄にしても作り直せる。
       [p('v2', 'red'), p('h3', 'green'), p('h4', 'blue')],
     ],
-    objectives: [{ kind: 'combo', target: 1, label: 'BOMBを残して 特殊2個を いっしょに起爆' }],
+    objectives: [{ kind: 'combo', target: 1, label: 'BOMBを残して 2個同時起爆' }],
     tutorial: {
       intro:
         'BOMBを 今は 消さずに 残そう。\n' +
@@ -530,7 +530,7 @@ export const STAGES: readonly StageDef[] = [
       [p('v2', 'blue'), p('h3', 'yellow'), p('h4', 'purple')],
       [p('v2', 'red'), p('h3', 'green'), p('h4', 'blue')],
     ],
-    objectives: [{ kind: 'combo', target: 1, label: '特殊2個を いっしょに起爆（COMBO）' }],
+    objectives: [{ kind: 'combo', target: 1, label: '特殊2個を 同時起爆' }],
     // 答えは書かない。文字ヒントも intro も出さない。予告は既存仕様のまま。
     tutorial: { showGuide: false },
   },

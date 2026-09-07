@@ -320,21 +320,39 @@ describe('意図したルールが実際に発生する', () => {
     expect(ten.kind).toBe('combo');
     expect(ten.effect).toBe('rocket+bomb'); // effect 指定は据え置き
     expect(ten.target).toBe(1);
-    expect(ten.label).toBe('ROCKET と BOMB を いっしょに起爆（COMBO）');
+    expect(ten.label).toBe('ROCKET＋BOMB 同時起爆');
 
     const eleven = stageById(11).objectives[0]!;
     expect(eleven.kind).toBe('combo');
     expect(eleven.effect).toBeUndefined();
-    expect(eleven.label).toBe('BOMBを残して 特殊2個を いっしょに起爆');
+    expect(eleven.label).toBe('BOMBを残して 2個同時起爆');
 
     const twelve = stageById(12).objectives[0]!;
     expect(twelve.kind).toBe('combo');
     expect(twelve.effect).toBeUndefined();
-    expect(twelve.label).toBe('特殊2個を いっしょに起爆（COMBO）');
+    expect(twelve.label).toBe('特殊2個を 同時起爆');
+
+    // 用語（COMBO）は intro / hint / 中央表示が説明するので、ラベルからは外す。
+    // 320px 幅では .obj .lbl が nowrap + ellipsis なので、長いと無言で省略される。
+    for (const id of [10, 11, 12])
+      expect(stageById(id).objectives[0]!.label, `stage ${id}`).not.toContain('COMBO');
 
     // 文言を変えても達成判定は変わらない
     expect(play(10, SOLUTIONS[10]!).objectiveProgress()[0]!.done).toBe(true);
+    expect(play(11, SOLUTIONS[11]!).objectiveProgress()[0]!.done).toBe(true);
     expect(play(12, SOLUTIONS[12]!).objectiveProgress()[0]!.done).toBe(true);
+
+    // 達成のタイミングも変わらない（combo が成立した wave まで先出ししない）
+    for (const [id, moves] of [
+      [10, SOLUTIONS[10]!],
+      [11, SOLUTIONS[11]!],
+      [12, SOLUTIONS[12]!],
+    ] as const) {
+      const st = new StageState(stageById(id));
+      for (const m of moves) st.place(m.t, m.r, m.c);
+      expect(st.presentation(1).objectives[0]!.done, `stage ${id} wave1`).toBe(false);
+      expect(st.presentation(2).objectives[0]!.done, `stage ${id} wave2`).toBe(true);
+    }
   });
 
   it('Stage 11: 想定解では ROCKET を作って残し、BOMB へ届かせて COMBO になる', () => {

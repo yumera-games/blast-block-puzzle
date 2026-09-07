@@ -10,6 +10,7 @@
  *   ④ 実際にドラッグして配置できる（マウスとタッチの両方）
  *   ⑤ Stage 1〜12 を順に読み込める
  *   ⑥ debug 表示を ON / OFF できる
+ *   ⑦ objective のラベルが省略（ellipsis）されずに全文出る
  */
 import { existsSync } from 'fs';
 import { mkdirSync } from 'fs';
@@ -62,6 +63,26 @@ for (const [w, h] of SIZES) {
   if (m.canvas.w < 180) ng.push(`${w}x${h}: 盤面が ${m.canvas.w}px しかない`);
   if (m.gapBottom < 4) ng.push(`${w}x${h}: 操作ボタンの下に余白がない`);
   note.push(`  ${w}x${h}: canvas ${m.canvas.w}x${m.canvas.h} / 下の余白 ${m.gapBottom}px / stage ${m.state.stage}`);
+
+  // ⑦ objective ラベルが省略されていないか。
+  // .obj .lbl は nowrap + text-overflow: ellipsis なので、はみ出すと無言で「…」になる。
+  // 見た目では気づきにくいので scrollWidth <= clientWidth を実測する。
+  for (const id of [10, 11, 12]) {
+    await page.evaluate((n) => window.__blast.goStage(n), id);
+    await page.waitForTimeout(120);
+    const labels = await page.evaluate(() =>
+      [...document.querySelectorAll('#objectives .obj .lbl')].map((el) => ({
+        text: el.textContent,
+        clientWidth: el.clientWidth,
+        scrollWidth: el.scrollWidth,
+      })),
+    );
+    for (const lb of labels) {
+      if (lb.scrollWidth > lb.clientWidth)
+        ng.push(`${w}x${h}: Stage ${id} の objective が省略されている「${lb.text}」 ${lb.scrollWidth} > ${lb.clientWidth}px`);
+      note.push(`  ${w}x${h}: Stage ${id} objective「${lb.text}」 scrollWidth ${lb.scrollWidth} <= clientWidth ${lb.clientWidth}`);
+    }
+  }
 
   await ctx.close();
 }
