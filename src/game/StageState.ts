@@ -2,7 +2,7 @@ import type { Objective, StageDef } from '../data/stages';
 import { Board } from './Board';
 import { PieceGenerator, isStuck } from './PieceGenerator';
 import { canPlacePiece, placePiece } from './Piece';
-import { resolveBoard } from './Resolver';
+import { resolveBoard, summarizeEvents } from './Resolver';
 import type { Piece, ResolutionResult, SetEvaluation } from './types';
 
 export type StageStatus = 'playing' | 'cleared' | 'failed';
@@ -23,6 +23,22 @@ export interface ObjectiveProgress {
 }
 
 /**
+ * **表示用の途中経過。**論理状態（score / status / objectiveProgress）とは別物。
+ *
+ * 直前の resolution を「先頭 n wave まで再生したところ」の見え方を表す。
+ * 論理状態は place() の時点で確定しているが、HUD はこちらを描く。
+ * そうしないと CHAIN 演出が始まる前に最終スコアと目的の達成が出てしまう。
+ */
+export interface Presentation {
+  readonly score: number;
+  /** 再生中の CHAIN（= wave 番号）。まだ何も再生していなければ 0。 */
+  readonly chain: number;
+  readonly objectives: readonly ObjectiveProgress[];
+  /** 最終 wave まで再生し終えたか。クリア／失敗カードはこれが true になってから。 */
+  readonly settled: boolean;
+}
+
+/**
  * 1ステージぶんの進行状態。**描画を知らない。**
  * 盤面・トレイ・手数・目的の達成度をここで持ち、シーンは表示だけを担当する。
  */
@@ -39,6 +55,9 @@ export class StageState {
   lastResult!: ResolutionResult | null;
   private progress!: number[];
   private uidSeq!: number;
+  /** 直前の resolution を適用する **前** のスコアと目的進捗。表示の途中経過を組み立てる土台。 */
+  private scoreBefore!: number;
+  private progressBefore!: number[];
 
   constructor(def: StageDef) {
     this.def = def;
@@ -55,6 +74,8 @@ export class StageState {
     this.maxChain = 0;
     this.lastResult = null;
     this.progress = this.def.objectives.map(() => 0);
+    this.scoreBefore = 0;
+    this.progressBefore = [...this.progress];
     this.uidSeq = this.board.maxUid();
     this.tray = this.generator.next(this.board);
     this.updateStatus();
@@ -110,6 +131,8 @@ export class StageState {
   }
 
   private applyResolution(result: ResolutionResult): void {
+    this.scoreBefore = this.score;
+    this.progressBefore = [...this.progress];
     this.lastResult = result;
     this.score += result.totalScore;
     if (result.maxChain > this.maxChain) this.maxChain = result.maxChain;
@@ -124,6 +147,35 @@ export class StageState {
       const current = Math.min(this.progress[i] ?? 0, objective.target);
       return { objective, current, target: objective.target, done: current >= objective.target };
     });
+  }
+
+  /**
+   * 直前の resolution を先頭 `waves` 個まで再生した時点の**表示用**スナップショット。
+   *
+   * 論理状態は一切動かさない。集計に summarizeEvents と measure をそのまま使うので、
+   * waves が最終 wave に達したときは必ず論理状態（score / objectiveProgress）と一致する。
+   */
+  presentation(waves: number): Presentation {
+    const r = this.lastResult;
+    if (!r || r.events.length === 0) {
+      return { score: this.score, chain: 0, objectives: this.objectiveProgress(), settled: true };
+    }
+    const n = Math.max(0, Math.min(Math.floor(waves), r.events.length));
+    const prefix = r.events.slice(0, n);
+    const partial = summarizeEvents(prefix);
+
+    const objectives = this.def.objectives.map((objective, i) => {
+      const raw = (this.progressBefore[i] ?? 0) + measure(objective, partial);
+      const current = Math.min(raw, objective.target);
+      return { objective, current, target: objective.target, done: current >= objective.target };
+    });
+
+    return {
+      score: this.scoreBefore + partial.totalScore,
+      chain: n > 0 ? prefix[n - 1]!.chainIndex : 0,
+      objectives,
+      settled: n >= r.events.length,
+    };
   }
 
   isCleared(): boolean {

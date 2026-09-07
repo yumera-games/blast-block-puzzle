@@ -13,12 +13,12 @@ describe('スコア', () => {
   });
 
   it('COLOR BLAST に含まれるセルは 1.25 倍', () => {
-    // 8 セルのうち 4 セルが COLOR BLAST 成分（うち 1 セルはライン外）。
-    const { result } = playOne(rows({ 6: '.R......', 7: '.RRBYGPR' }), 'dot', 'red', 7, 0);
+    // 赤は 5 セル連結（うち 2 セルはライン外）。閾値 5 ちょうどで COLOR BLAST になる。
+    const { result } = playOne(rows({ 5: '.R......', 6: '.R......', 7: '.RRBYGPY' }), 'dot', 'red', 7, 0);
     const removed = result.events[0]!.removed;
     const blastCells = removed.filter((r) => r.source === 'blast').length;
     const lineCells = removed.filter((r) => r.source === 'line').length;
-    expect(blastCells).toBe(4);
+    expect(blastCells).toBe(5);
     const expected = Math.round(
       (lineCells * BALANCE.score.perCell + blastCells * BALANCE.score.perCell * BALANCE.score.colorBlastMultiplier) * 1.0,
     );

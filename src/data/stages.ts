@@ -165,32 +165,46 @@ export const STAGES: readonly StageDef[] = [
   },
 
   // ---------------------------------------------------------------- Stage 5
+  // ROCKET を「作る」だけでなく「残して、あとで巻きこんで起爆する」まで 1 ステージで見せる。
+  // 2 行を同時に消すので Rocket は縦向きになる。縦向きは行では起爆させられないため、
+  // 「行をそろえて巻きこむ → 縦に飛ぶ」という向きの関係がそのまま教材になる。
   {
     id: 5,
-    name: '2ライン 同時完成',
+    name: 'ROCKET を 作って 起爆する',
     seed: 1005,
-    moves: 5,
+    moves: 6,
     initialBoard: [
-      '.......Y',
-      '.......G',
-      '.......P',
       '.......R',
       '.......B',
       '.......Y',
       '.......G',
+      '........',
+      '........',
       'RBYGPRB.',
+      'BYGPRBY.',
     ],
-    fixedSets: [[p('dot', 'purple'), p('h2', 'blue'), p('v2', 'green')]],
+    fixedSets: [[p('v2', 'green'), p('h4', 'blue'), p('h3', 'purple')]],
     objectives: [
-      { kind: 'simultaneousLines', target: 1, param: 2, label: '2ラインを 同時に 消す' },
+      { kind: 'specialCreated', target: 1, special: 'rocket', label: 'ROCKET を 作る' },
+      { kind: 'specialDetonated', target: 1, special: 'rocket', label: 'ROCKET を 起爆する' },
     ],
     tutorial: {
-      intro: '2ラインを 同時に 消すと ROCKET が 生まれます。\nROCKET は その場に 残り、あとで 巻きこまれると 起爆します。',
-      showGuide: false,
+      intro:
+        '2ラインを 同時に 消すと ROCKET が 生まれます。\n' +
+        'ROCKET は その場に 残ります。\n' +
+        'あとで ラインに 巻きこむと、向いている 方向へ まとめて 消します。',
+      showGuide: true,
+      hints: [
+        { move: 0, pieceIndex: 0, row: 6, col: 7, text: 'たてに 置くと 2ライン 同時に そろいます' },
+        { move: 1, pieceIndex: 1, row: 6, col: 0, text: 'ROCKET と 同じ行を うめていきます' },
+        { move: 2, pieceIndex: 2, row: 6, col: 4, text: 'この行が そろうと ROCKET が たてに 飛びます' },
+      ],
     },
   },
 
   // ---------------------------------------------------------------- Stage 6
+  // COLOR BLAST 単体の教材。閾値 5 ちょうどではなく 7 マスの塊にして、
+  // ライン外が 4 マス（2x2）まとめて消えるところを見せる。8 未満なので特殊は生まれない。
   {
     id: 6,
     name: 'COLOR BLAST',
@@ -202,16 +216,18 @@ export const STAGES: readonly StageDef[] = [
       '........',
       '........',
       '........',
-      '........',
-      '.R......',
-      '.RRBYGPR',
+      '.RR.....',
+      '.RR.....',
+      '.RRBYGPY',
     ],
     fixedSets: [[p('dot', 'red'), p('h2', 'green'), p('v2', 'blue')]],
     objectives: [
-      { kind: 'colorBlast', target: 1, param: 4, label: '4マス以上の COLOR BLAST を 1回' },
+      { kind: 'colorBlast', target: 1, param: 5, label: '5マス以上の COLOR BLAST を 1回' },
     ],
     tutorial: {
-      intro: 'ライン上の 同じ色が 4つ以上 つながっていると、\nライン外の 同色まで まとめて 消えます（COLOR BLAST）。',
+      intro:
+        'ライン上の 同じ色が 5つ以上 つながっていると、\n' +
+        'ライン外の 同色まで まとめて 消えます（COLOR BLAST）。',
       showGuide: false,
     },
   },
@@ -226,50 +242,56 @@ export const STAGES: readonly StageDef[] = [
       '........',
       '........',
       '........',
-      '........',
       '.G......',
+      '.GG.....',
       '.GGBYPRB',
-      '.R......',
+      '.RR.....',
       '.RRBYGPR',
     ],
     fixedSets: [[p('dot', 'red'), p('dot', 'green'), p('h2', 'purple')]],
     objectives: [
-      { kind: 'colorBlast', target: 2, param: 4, label: '4マス以上の COLOR BLAST を 2回' },
+      { kind: 'colorBlast', target: 2, param: 5, label: '5マス以上の COLOR BLAST を 2回' },
     ],
     tutorial: { showGuide: false },
   },
 
   // ---------------------------------------------------------------- Stage 8
+  // Stage 5 と同じ「作って起爆する」だが、行と列の交点で作るので Rocket は横向きになる。
+  // 横向きは列をそろえて巻きこむ。向きによって巻きこみ方が変わることを確かめさせる。
   {
     id: 8,
-    name: 'ROCKET を 起爆する',
+    name: 'ROCKET の 向きを 使う',
     seed: 1008,
     moves: 8,
     initialBoard: [
-      '.......Y',
-      '.......G',
-      '.......P',
-      '.......R',
-      '.......B',
-      '.......Y',
-      '.......G',
-      'RBYGPRB.',
+      'Y.......',
+      'G.......',
+      'P.......',
+      'R.......',
+      'B.......',
+      'Y.......',
+      'G.......',
+      '.RBYGPRB',
     ],
     fixedSets: [
-      [p('dot', 'purple'), p('dot', 'green'), p('dot', 'yellow')],
-      [p('h4', 'blue'), p('h3', 'yellow'), p('dot', 'green')],
+      [p('dot', 'purple'), p('h3', 'yellow'), p('v4', 'blue')],
+      [p('v3', 'green'), p('dot', 'red'), p('h2', 'blue')],
     ],
     objectives: [
       { kind: 'specialCreated', target: 1, special: 'rocket', label: 'ROCKET を 作る' },
       { kind: 'specialDetonated', target: 1, special: 'rocket', label: 'ROCKET を 起爆する' },
     ],
     tutorial: {
-      intro: '特殊ピースは タップでは 起動しません。\nあとから ラインなどで 巻きこむと 起爆します。',
+      intro:
+        '行と列を 同時に 消すと、よこ向きの ROCKET が 生まれます。\n' +
+        'よこ向きは 列を そろえて 巻きこむと、その行を まとめて 消します。',
       showGuide: false,
     },
   },
 
   // ---------------------------------------------------------------- Stage 9
+  // 赤の塊は Phase 1 で読みやすさが良かったので見せ方は踏襲し、
+  // 新しい BOMB 閾値（11）に合わせて 12 マスへ増やす。青 3 マスは BOMB の 3x3 の的。
   {
     id: 9,
     name: 'BOMB を 起爆する',
@@ -279,46 +301,51 @@ export const STAGES: readonly StageDef[] = [
       '........',
       '........',
       '........',
-      '........',
       '.RRR....',
       '.RRR....',
-      '.RR.....',
-      '.RYBGPYB',
+      '.RRR....',
+      '.RRBBB..',
+      'YRYB.GPB',
     ],
-    fixedSets: [
-      [p('dot', 'green'), p('dot', 'purple'), p('dot', 'yellow')],
-      [p('h4', 'blue'), p('h3', 'yellow'), p('dot', 'green')],
-    ],
+    fixedSets: [[p('dot', 'yellow'), p('h4', 'purple'), p('h3', 'green')]],
     objectives: [
       { kind: 'specialCreated', target: 1, special: 'bomb', label: 'BOMB を 作る' },
       { kind: 'specialDetonated', target: 1, special: 'bomb', label: 'BOMB を 起爆する' },
     ],
     tutorial: {
-      intro: '9マス以上の COLOR BLAST で BOMB が 生まれます。',
+      intro:
+        '11マス以上の COLOR BLAST で BOMB が 生まれます。\n' +
+        'BOMB は 巻きこまれると まわりの 3x3 を 消します。',
       showGuide: false,
     },
   },
 
   // --------------------------------------------------------------- Stage 10
+  // プレイヤーの 1 手で起爆が始まり、
+  //   wave1 ライン消去 → wave2 ROCKET の射線が BOMB へ届いて combo →
+  //   combo の十字が 上の ROCKET へ届いて wave3
+  // と進む。combo と連続起爆の両方が 1 回の resolution に入る。
   {
     id: 10,
     name: 'CHAIN 3',
     seed: 1010,
     moves: 8,
     initialBoard: [
+      'YY..>.YY',
+      '...YYY..',
       '........',
       '........',
-      '..YYY...',
-      '..Y*Y...',
-      '..YYY...',
       '........',
       '........',
-      'RB.^YGPB',
+      '..RR....',
+      'RB>.*GPB',
     ],
     fixedSets: [[p('dot', 'green'), p('dot', 'purple'), p('dot', 'red')]],
     objectives: [{ kind: 'chain', target: 1, param: 3, label: 'CHAIN 3 以上を 1回' }],
     tutorial: {
-      intro: '特殊が 別の 特殊を 巻きこむと CHAIN が つながります。',
+      intro:
+        '特殊の 効果が 別の 特殊へ 届くと、いっしょに 起爆します（combo）。\n' +
+        'その先の 特殊へ さらに 届くと、CHAIN が のびていきます。',
       showGuide: false,
     },
   },

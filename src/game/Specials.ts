@@ -56,6 +56,9 @@ export function decideSpawn(ctx: SpawnContext): SpawnInfo | null {
   } else if (lineCount >= cfg.bomb.linesRequired) {
     kind = 'bomb';
     reason = `lines>=${cfg.bomb.linesRequired} (${lineCount})`;
+  } else if (maxBlast >= cfg.rocket.blastSize) {
+    kind = 'rocket';
+    reason = `colorBlast>=${cfg.rocket.blastSize} (${maxBlast})`;
   } else if (lineCount === cfg.rocket.linesRequired) {
     kind = 'rocket';
     reason = `lines==${cfg.rocket.linesRequired}`;
@@ -143,43 +146,86 @@ export function pickRocketDirection(ctx: SpawnContext, index: number): RocketDir
    消去対象へ巻き込まれたときだけ起爆する。
    ========================================================================== */
 
-/**
- * 同一 wave で起爆する特殊を、盤面上の上下左右の隣接でグループ化する。
- * グループのサイズが 2 以上なら「特殊×特殊」の combo として扱う。
- */
-export function groupAdjacentSpecials(board: Board, specials: readonly SpecialInstance[]): SpecialInstance[][] {
-  const byIndex = new Map<number, SpecialInstance>();
-  for (const s of specials) byIndex.set(s.index, s);
-
-  const seen = new Set<number>();
-  const groups: SpecialInstance[][] = [];
-  // index 昇順で走査してグループ順序を決定論にする。
-  const ordered = [...specials].sort((a, b) => a.index - b.index);
-
-  for (const s of ordered) {
-    if (seen.has(s.index)) continue;
-    const group: SpecialInstance[] = [];
-    const stack = [s.index];
-    seen.add(s.index);
-    while (stack.length > 0) {
-      const i = stack.pop()!;
-      group.push(byIndex.get(i)!);
-      for (const n of board.neighbors(i)) {
-        if (!byIndex.has(n) || seen.has(n)) continue;
-        seen.add(n);
-        stack.push(n);
-      }
-    }
-    group.sort((a, b) => a.index - b.index);
-    groups.push(group);
-  }
-  return groups;
-}
-
 export interface DetonationContext {
   readonly board: Board;
   /** Rainbow の対象色を決めるときの最後のよりどころ。 */
   readonly fallbackColor: Color | null;
+}
+
+/** 単独起爆したときの到達範囲。combo 判定はこれだけを見る。 */
+interface SoloReach {
+  /** 効果が及ぶ盤面セル。 */
+  readonly cells: ReadonlySet<number>;
+  /** Rainbow のときだけ、その対象色。Rainbow 以外は null。 */
+  readonly rainbowColor: Color | null;
+}
+
+/**
+ * 「単独で起爆したら、どこまで届くか」を求める。
+ *
+ * Rainbow の効果は盤面の同色セル全体なので、通常セルの集合には特殊ピースが入らない。
+ * そのため Rainbow だけは **対象色を持つ特殊へも届く** と見なす（対象色で判定する）。
+ */
+function soloReach(s: SpecialInstance, ctx: DetonationContext): SoloReach {
+  const cells = new Set(detonate([s], ctx).cells);
+  const rainbowColor = s.kind === 'rainbow' ? rainbowTargetColor([s], ctx) : null;
+  return { cells, rainbowColor };
+}
+
+function reaches(from: SoloReach, to: SpecialInstance): boolean {
+  if (from.cells.has(to.index)) return true;
+  return from.rainbowColor !== null && to.color === from.rainbowColor;
+}
+
+/**
+ * 同一 wave で起爆する特殊を「効果の到達」でグループ化する（Phase 2A）。
+ *
+ * **隣接しているかどうかは見ない。** ある特殊が単独で起爆したときの効果範囲が
+ * 別の特殊へ実際に届いたときだけ、その2つを同じ combo グループにする。
+ * 到達は片方向でも成立させ、グループは推移閉包を取る
+ * （A の射線が B に届き、B の範囲が C に届くなら A・B・C で1グループ）。
+ *
+ * 同じ wave に居るだけでは combo にならない。順序は index 昇順で決定論。
+ */
+export function groupByEffectReach(
+  specials: readonly SpecialInstance[],
+  ctx: DetonationContext,
+): SpecialInstance[][] {
+  const ordered = [...specials].sort((a, b) => a.index - b.index);
+  const n = ordered.length;
+  if (n <= 1) return n === 1 ? [[ordered[0]!]] : [];
+
+  const solo = ordered.map((s) => soloReach(s, ctx));
+  const linked = ordered.map(() => new Set<number>());
+  for (let a = 0; a < n; a++) {
+    for (let b = 0; b < n; b++) {
+      if (a === b) continue;
+      if (!reaches(solo[a]!, ordered[b]!)) continue;
+      linked[a]!.add(b);
+      linked[b]!.add(a); // 到達は片方向でも、combo は相互のものとして扱う
+    }
+  }
+
+  const seen = new Set<number>();
+  const groups: SpecialInstance[][] = [];
+  for (let start = 0; start < n; start++) {
+    if (seen.has(start)) continue;
+    const members: number[] = [];
+    const queue = [start];
+    seen.add(start);
+    while (queue.length > 0) {
+      const a = queue.shift()!;
+      members.push(a);
+      for (const b of [...linked[a]!].sort((x, y) => x - y)) {
+        if (seen.has(b)) continue;
+        seen.add(b);
+        queue.push(b);
+      }
+    }
+    members.sort((x, y) => x - y);
+    groups.push(members.map((i) => ordered[i]!));
+  }
+  return groups;
 }
 
 /**

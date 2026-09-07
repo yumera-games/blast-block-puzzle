@@ -29,11 +29,11 @@ let currentStage = FIRST_STAGE;
 let layout: Layout = computeLayout(360, 640, 1);
 
 const hooks: SceneHooks = {
-  onUpdate(state, chainNow) {
+  onUpdate(state, chainNow, shown) {
     const hint = tutorial.currentHint(state);
     scene.setHint(hint);
     tutorial.renderHintText(hint);
-    hud.update(state, chainNow);
+    hud.update(state, chainNow, shown);
     debug.render({ state, lastResult: state.lastResult, chainNow, fps: Math.round(game.loop.actualFps) });
   },
   onStageStart(state) {
@@ -213,6 +213,8 @@ window.__blast = {
       lines: r.rowsCleared + r.colsCleared,
       simultaneous: Math.max(0, ...r.events.map((e) => e.lines.length)),
       blastSizes: r.events.flatMap((e) => e.blasts.map((b) => b.size)),
+      effects: r.events.flatMap((e) => e.detonations.map((d) => d.effect)),
+      waveScores: r.events.map((e) => e.score),
       created: [...r.specialsCreated],
       detonated: [...r.specialsDetonated],
       aborted: r.aborted,

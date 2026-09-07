@@ -39,27 +39,28 @@ const SOLUTIONS: Record<number, Move[]> = {
     { t: 1, r: 5, c: 3 }, // h2    → 行 5
     { t: 2, r: 3, c: 5 }, // h3    → 行 3
   ],
-  5: [{ t: 0, r: 7, c: 7 }], // 行 7 と 列 7 が同時完成 → Rocket
-  6: [{ t: 0, r: 7, c: 0 }], // 赤 4 連結 → COLOR BLAST
+  5: [
+    { t: 0, r: 6, c: 7 }, // v2 → 行 6 と 行 7 が同時完成 → たて向き Rocket
+    { t: 1, r: 6, c: 0 }, // h4 → 行 6 を埋めはじめる
+    { t: 2, r: 6, c: 4 }, // h3 → 行 6 完成、Rocket を巻きこんで列 7 を消す
+  ],
+  6: [{ t: 0, r: 7, c: 0 }], // 赤 7 連結 → COLOR BLAST（ライン外 4 マス）
   7: [
-    { t: 0, r: 7, c: 0 },
-    { t: 1, r: 5, c: 0 },
+    { t: 0, r: 7, c: 0 }, // 赤 5 連結
+    { t: 1, r: 5, c: 0 }, // 緑 6 連結
   ],
   8: [
-    { t: 0, r: 7, c: 7 }, // Rocket 生成
-    { t: 1, r: 0, c: 0 }, // 余った候補を空きへ逃がす
-    { t: 2, r: 0, c: 2 },
-    { t: 0, r: 7, c: 0 }, // h4
-    { t: 1, r: 7, c: 4 }, // h3 → 行 7 完成、Rocket を巻きこむ
+    { t: 0, r: 7, c: 0 }, // 行 7 と 列 0 が同時完成 → よこ向き Rocket
+    { t: 1, r: 7, c: 4 }, // h3 → Rocket の射線上に的を置く
+    { t: 2, r: 0, c: 0 }, // v4 → 列 0 を埋めはじめる
+    { t: 0, r: 4, c: 0 }, // v3（2セット目）→ 列 0 完成、Rocket を巻きこむ
   ],
   9: [
-    { t: 0, r: 7, c: 0 }, // 赤 9 連結 → Bomb 生成
-    { t: 1, r: 0, c: 0 },
-    { t: 2, r: 0, c: 2 },
-    { t: 0, r: 7, c: 1 }, // h4
-    { t: 1, r: 7, c: 5 }, // h3 → 行 7 完成、Bomb を巻きこむ
+    { t: 0, r: 7, c: 4 }, // 赤 12 連結 → Bomb 生成
+    { t: 1, r: 7, c: 0 }, // h4
+    { t: 2, r: 7, c: 5 }, // h3 → 行 7 完成、Bomb を巻きこむ
   ],
-  10: [{ t: 0, r: 7, c: 2 }], // 行 7 → Rocket → Bomb で CHAIN 3
+  10: [{ t: 0, r: 7, c: 3 }], // 行 7 → rocket+bomb combo → 上の Rocket へ届いて CHAIN 3
 };
 
 describe('ステージデータの健全性', () => {
@@ -85,12 +86,13 @@ describe('ステージデータの健全性', () => {
     }
   });
 
-  it('Stage 1〜3 はガイド表示あり、Stage 4 以降は常時表示しない', () => {
-    for (const s of STAGES) expect(s.tutorial.showGuide).toBe(s.id <= 3);
+  it('ガイドを常時表示するのは基本操作の Stage 1〜3 と、手順が 3 手ある Stage 5 だけ', () => {
+    const withGuide = new Set([1, 2, 3, 5]);
+    for (const s of STAGES) expect(s.tutorial.showGuide, `stage ${s.id}`).toBe(withGuide.has(s.id));
   });
 
   it('新システム登場ステージには intro がある', () => {
-    for (const id of [5, 6, 8, 9]) expect(stageById(id).tutorial.intro, `stage ${id}`).toBeTruthy();
+    for (const id of [5, 6, 8, 9, 10]) expect(stageById(id).tutorial.intro, `stage ${id}`).toBeTruthy();
   });
 
   it('同じ seed から同じ初期トレイが再現される', () => {
@@ -115,35 +117,52 @@ describe('Stage 1〜10 を想定解で通しプレイする', () => {
 });
 
 describe('意図したルールが実際に発生する', () => {
-  it('Stage 5: 2 ライン同時完成で Rocket が生まれ、盤面に残る', () => {
-    const st = play(5, SOLUTIONS[5]!);
-    const ev = st.lastResult!.events[0]!;
-    expect(ev.lines.length).toBe(2);
+  it('Stage 5: 2 ライン同時完成で Rocket が生まれ、同じステージ内で起爆まで見せる', () => {
+    const st = new StageState(stageById(5));
+
+    // 1 手目：2 ライン同時 → Rocket が生まれ、盤面に残る（まだ起爆しない）
+    st.place(0, 6, 7);
+    expect(st.lastResult!.events[0]!.lines.length).toBe(2);
     expect(st.lastResult!.specialsCreated).toEqual(['rocket']);
-    expect(st.board.specialIndices().length).toBe(1);
     expect(st.lastResult!.specialsDetonated.length).toBe(0);
+    expect(st.board.specialIndices().length).toBe(1);
+    expect(st.status).toBe('playing'); // 生成だけではクリアにしない
+
+    // 2〜3 手目：Rocket と同じ行をそろえて巻きこむ
+    st.place(1, 6, 0);
+    st.place(2, 6, 4);
+    expect(st.lastResult!.specialsDetonated).toEqual(['rocket']);
+    expect(st.lastResult!.events[1]!.detonations[0]!.effect).toBe('rocket');
+    // たて向きなので列 7 に残っていた 4 セルが消える
+    expect(st.lastResult!.events[1]!.removed.length).toBe(4);
+    expect(st.status).toBe('cleared');
   });
 
-  it('Stage 6: 4 セル以上の COLOR BLAST が起きる', () => {
+  it('Stage 6: 5 マス以上の COLOR BLAST が起き、ライン外が 4 マス消える', () => {
     const st = play(6, SOLUTIONS[6]!);
-    const blasts = st.lastResult!.events[0]!.blasts;
-    expect(blasts.length).toBe(1);
-    expect(blasts[0]!.size).toBeGreaterThanOrEqual(4);
-    expect(blasts[0]!.color).toBe('red');
+    const ev = st.lastResult!.events[0]!;
+    expect(ev.blasts.length).toBe(1);
+    expect(ev.blasts[0]!.size).toBeGreaterThanOrEqual(5);
+    expect(ev.blasts[0]!.color).toBe('red');
+    // ライン(行 7)の外で消えたセル数＝教材としての「見た目の差」
+    const offLine = ev.removed.filter((r) => Math.floor(r.index / 8) !== 7).length;
+    expect(offLine).toBe(4);
+    // 5〜7 マスなので特殊は生まれない（COLOR BLAST だけを教える）
+    expect(st.lastResult!.specialsCreated.length).toBe(0);
   });
 
-  it('Stage 7: COLOR BLAST が 2 回起きる', () => {
+  it('Stage 7: 5 マス以上の COLOR BLAST が 2 回起きる', () => {
     const st = new StageState(stageById(7));
     let count = 0;
     for (const m of SOLUTIONS[7]!) {
       st.place(m.t, m.r, m.c);
-      count += st.lastResult!.events.reduce((a, e) => a + e.blasts.filter((b) => b.size >= 4).length, 0);
+      count += st.lastResult!.events.reduce((a, e) => a + e.blasts.filter((b) => b.size >= 5).length, 0);
     }
     expect(count).toBe(2);
     expect(st.status).toBe('cleared');
   });
 
-  it('Stage 8: Rocket を作り、あとの LINE CLEAR で起爆する', () => {
+  it('Stage 8: 行と列の同時完成で よこ向き Rocket が生まれ、列で巻きこんで起爆する', () => {
     const st = new StageState(stageById(8));
     const created: string[] = [];
     const detonated: string[] = [];
@@ -152,13 +171,13 @@ describe('意図したルールが実際に発生する', () => {
       created.push(...st.lastResult!.specialsCreated);
       detonated.push(...st.lastResult!.specialsDetonated);
     }
-    expect(created).toContain('rocket');
-    expect(detonated).toContain('rocket');
+    expect(created).toEqual(['rocket']);
+    expect(detonated).toEqual(['rocket']);
     expect(st.maxChain).toBeGreaterThanOrEqual(2);
     expect(st.status).toBe('cleared');
   });
 
-  it('Stage 9: 9 セルの COLOR BLAST で Bomb が生まれ、あとで起爆する', () => {
+  it('Stage 9: 11 マス以上の COLOR BLAST で Bomb が生まれ、同じステージ内で起爆する', () => {
     const st = new StageState(stageById(9));
     let blastSize = 0;
     const detonated: string[] = [];
@@ -168,16 +187,23 @@ describe('意図したルールが実際に発生する', () => {
         for (const b of e.blasts) blastSize = Math.max(blastSize, b.size);
       detonated.push(...st.lastResult!.specialsDetonated);
     }
-    expect(blastSize).toBeGreaterThanOrEqual(9);
-    expect(detonated).toContain('bomb');
+    expect(blastSize).toBeGreaterThanOrEqual(11);
+    expect(detonated).toEqual(['bomb']);
+    expect(st.lastResult!.events[1]!.detonations[0]!.effect).toBe('bomb');
     expect(st.status).toBe('cleared');
   });
 
-  it('Stage 10: Rocket → Bomb で CHAIN 3 以上', () => {
+  it('Stage 10: 1 手で combo と連続起爆が起き、CHAIN 3 に届く', () => {
     const st = play(10, SOLUTIONS[10]!);
-    expect(st.maxChain).toBeGreaterThanOrEqual(3);
-    expect(st.lastResult!.specialsDetonated).toEqual(['rocket', 'bomb']);
-    expect(st.lastResult!.aborted).toBe(false);
+    const r = st.lastResult!;
+    expect(r.maxChain).toBe(3);
+    // wave2 は「射線が BOMB へ届いた」combo、wave3 はその効果が届いた先の Rocket
+    expect(r.events[1]!.detonations[0]!.effect).toBe('rocket+bomb');
+    expect(r.events[2]!.detonations[0]!.effect).toBe('rocket');
+    expect(r.specialsDetonated).toEqual(['rocket', 'bomb', 'rocket']);
+    expect(r.aborted).toBe(false);
+    // スコアは wave ごとに積み上がる（どの wave も 0 点で終わらない）
+    for (const e of r.events) expect(e.score).toBeGreaterThan(0);
   });
 });
 

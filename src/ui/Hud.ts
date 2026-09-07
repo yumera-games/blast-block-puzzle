@@ -1,9 +1,13 @@
-import type { StageState } from '../game/StageState';
+import type { Presentation, StageState } from '../game/StageState';
 
 /**
  * 画面上部の HUD（DOM）。
  * Stage / Objective progress / Moves / Score / Chain を出す。
- * **ゲームロジックを持たない。** StageState を読むだけ。
+ * **ゲームロジックを持たない。** 渡されたものを描くだけ。
+ *
+ * スコアと目的は StageState の論理値ではなく Presentation（演出の途中経過）を描く。
+ * 論理値は配置した瞬間に確定してしまうので、そのまま描くと CHAIN 演出より先に
+ * 最終スコアと達成マークが出てしまう。
  */
 export class Hud {
   private readonly root: HTMLElement;
@@ -32,15 +36,14 @@ export class Hud {
     this.objectives = must('objectives');
   }
 
-  update(state: StageState, chainNow: number): void {
+  update(state: StageState, chainNow: number, shown: Presentation): void {
     this.stageV.textContent = `${state.def.id}. ${state.def.name}`;
     this.movesV.textContent = String(state.moves);
     this.movesBox.classList.toggle('low', state.moves <= 2);
-    this.scoreV.textContent = String(state.score);
+    this.scoreV.textContent = String(shown.score);
     this.chainV.textContent = chainNow > 0 ? String(chainNow) : '-';
 
-    const progress = state.objectiveProgress();
-    this.objectives.innerHTML = progress
+    this.objectives.innerHTML = shown.objectives
       .map(
         (p) =>
           `<div class="obj${p.done ? ' done' : ''}">` +

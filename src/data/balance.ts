@@ -23,25 +23,40 @@ export const BALANCE = {
 
   colorBlast: {
     /** connected component がこのサイズ以上のとき、ライン外セルも消去対象へ含める。 */
-    minSize: 4,
-    /** 暫定区分。band 名はスコアには影響せず、いまは計測とデバッグ表示にのみ使う。 */
+    minSize: 5,
+    /** 暫定区分。band 名はスコアには影響せず、いまは計測とデバッグ表示にのみ使う。
+     *  特殊の生成段階（none / rocket / bomb / rainbow）と同じ境目に合わせてある。 */
     bands: {
-      smallMin: 4,
-      mediumMin: 6,
-      largeMin: 9,
+      smallMin: 5,
+      mediumMin: 8,
+      largeMin: 11,
     },
   },
 
+  /**
+   * 特殊ピースの生成条件。
+   *
+   * COLOR BLAST の最大 connected component サイズによる段階（Phase 2A）:
+   *   5〜7   → 生成なし（COLOR BLAST そのものの報酬にとどめる）
+   *   8〜10  → Rocket
+   *   11〜14 → Bomb
+   *   15以上 → Rainbow
+   * 同時完成ライン数による条件は 2=Rocket / 3=Bomb / 4以上=Rainbow。
+   * 条件が重なっても生成は 1 wave につき 1 個で、優先順位は Rainbow > Bomb > Rocket。
+   */
   specials: {
     rocket: {
       /** 同時完成ライン数がちょうどこの数のとき Rocket を生成。 */
       linesRequired: 2,
+      /** COLOR BLAST connected component がこのサイズ以上で Rocket
+       *  （bomb.blastSize 未満のときだけ。上位の閾値が優先される）。 */
+      blastSize: 8,
     },
     bomb: {
       /** 同時完成ライン数がこの数以上、または */
       linesRequired: 3,
       /** COLOR BLAST connected component がこのサイズ以上で Bomb。 */
-      blastSize: 9,
+      blastSize: 11,
       /** 単体起爆の効果半径（1 = 3x3）。 */
       radius: 1,
     },
@@ -49,7 +64,7 @@ export const BALANCE = {
       /** 同時完成ライン数がこの数以上、または */
       linesRequired: 4,
       /** COLOR BLAST connected component がこのサイズ以上で Rainbow。 */
-      blastSize: 13,
+      blastSize: 15,
     },
     combo: {
       /** Bomb + Bomb の半径（2 = 5x5）。 */

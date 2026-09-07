@@ -189,12 +189,12 @@ const SOLUTIONS = {
   2: [[0, 7, 7], [1, 6, 0]],
   3: [[0, 7, 0], [1, 7, 7]],
   4: [[0, 7, 0], [1, 5, 3], [2, 3, 5]],
-  5: [[0, 7, 7]],
+  5: [[0, 6, 7], [1, 6, 0], [2, 6, 4]],
   6: [[0, 7, 0]],
   7: [[0, 7, 0], [1, 5, 0]],
-  8: [[0, 7, 7], [1, 0, 0], [2, 0, 2], [0, 7, 0], [1, 7, 4]],
-  9: [[0, 7, 0], [1, 0, 0], [2, 0, 2], [0, 7, 1], [1, 7, 5]],
-  10: [[0, 7, 2]],
+  8: [[0, 7, 0], [1, 7, 4], [2, 0, 0], [0, 4, 0]],
+  9: [[0, 7, 4], [1, 7, 0], [2, 7, 5]],
+  10: [[0, 7, 3]],
 };
 
 async function waitIdle() {
@@ -214,7 +214,7 @@ for (let id = 1; id <= 10; id++) {
   await page.evaluate((n) => window.__blast.goStage(n), id);
   await page.waitForTimeout(200);
   await closeCard();
-  const acc = { maxChain: 0, simultaneous: 0, blast: 0, created: [], detonated: [], lines: 0, aborted: false };
+  const acc = { maxChain: 0, simultaneous: 0, blast: 0, created: [], detonated: [], lines: 0, aborted: false, effects: [], waveScores: [] };
   for (const [t, r, c] of SOLUTIONS[id]) {
     await drag(t, r, c, false);
     await waitIdle();
@@ -226,6 +226,8 @@ for (let id = 1; id <= 10; id++) {
       acc.created.push(...last.created);
       acc.detonated.push(...last.detonated);
       acc.lines += last.lines;
+      acc.effects.push(...last.effects);
+      if (last.waveScores.length > acc.waveScores.length) acc.waveScores = last.waveScores;
       acc.aborted = acc.aborted || last.aborted;
     }
   }
@@ -234,18 +236,25 @@ for (let id = 1; id <= 10; id++) {
   if (acc.aborted) ng.push(`Stage ${id}: resolution が打ち切られた`);
   played.push(
     `  Stage ${id}: ${s.status} score=${s.score} lines=${acc.lines} maxChain=${acc.maxChain} ` +
-      `blast=${acc.blast} created=[${acc.created}] detonated=[${acc.detonated}]`,
+      `blast=${acc.blast} created=[${acc.created}] detonated=[${acc.detonated}] ` +
+      `effects=[${acc.effects}] waveScores=[${acc.waveScores}]`,
   );
 
   // 意図したルールが起きたかを個別に確認する
   if (id === 5 && acc.simultaneous < 2) ng.push('Stage 5: 2ライン同時完成が起きていない');
-  if (id === 5 && !acc.created.includes('rocket')) ng.push('Stage 5: Rocket が生成されていない');
-  if (id === 6 && acc.blast < 4) ng.push('Stage 6: 4セル以上の COLOR BLAST が起きていない');
+  if (id === 5 && !(acc.created.includes('rocket') && acc.detonated.includes('rocket')))
+    ng.push('Stage 5: Rocket の生成 or 起爆が同じステージ内で起きていない');
+  if (id === 6 && acc.blast < 5) ng.push('Stage 6: 5セル以上の COLOR BLAST が起きていない');
+  if (id === 6 && acc.created.length) ng.push('Stage 6: COLOR BLAST 教材なのに特殊が生まれている');
   if (id === 8 && !(acc.created.includes('rocket') && acc.detonated.includes('rocket')))
     ng.push('Stage 8: Rocket の生成 or 起爆が起きていない');
-  if (id === 9 && !(acc.blast >= 9 && acc.detonated.includes('bomb')))
-    ng.push('Stage 9: 9セル COLOR BLAST or Bomb 起爆が起きていない');
+  if (id === 9 && !(acc.blast >= 11 && acc.detonated.includes('bomb')))
+    ng.push('Stage 9: 11セル COLOR BLAST or Bomb 起爆が起きていない');
   if (id === 10 && acc.maxChain < 3) ng.push('Stage 10: CHAIN 3 に届いていない');
+  if (id === 10 && !acc.effects.includes('rocket+bomb'))
+    ng.push('Stage 10: 効果到達型 combo (rocket+bomb) が起きていない');
+  if (id === 10 && !(acc.waveScores.length === 3 && acc.waveScores.every((v) => v > 0)))
+    ng.push(`Stage 10: wave ごとのスコアが積み上がっていない (${acc.waveScores})`);
 
   await closeCard();
 }

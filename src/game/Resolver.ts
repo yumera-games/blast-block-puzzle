@@ -2,7 +2,7 @@ import { BALANCE } from '../data/balance';
 import type { Board } from './Board';
 import { findColorBlasts } from './ColorBlast';
 import { scoreRemoval } from './Score';
-import { decideSpawn, detonate, groupAdjacentSpecials } from './Specials';
+import { decideSpawn, detonate, groupByEffectReach } from './Specials';
 import { chainMultiplier } from '../data/balance';
 import {
   type Cell,
@@ -48,14 +48,10 @@ export function resolveBoard(board: Board, opts: ResolveOptions = {}): Resolutio
   const placedCenter = centerOf(board, placedCells);
 
   const events: ResolutionEvent[] = [];
-  const specialsCreated: SpecialKind[] = [];
-  const specialsDetonated: SpecialKind[] = [];
   const detonatedUids = new Set<number>();
 
   let pending: SpecialInstance[] = [];
   let chainIndex = 0;
-  let rowsCleared = 0;
-  let colsCleared = 0;
   let aborted = false;
 
   for (let wave = 0; ; wave++) {
@@ -80,13 +76,11 @@ export function resolveBoard(board: Board, opts: ResolveOptions = {}): Resolutio
     const detonations: Detonation[] = [];
     const detonationCells = new Set<number>();
     if (pending.length > 0) {
-      const groups = groupAdjacentSpecials(board, pending);
+      const detCtx = { board, fallbackColor: placedColor };
+      const groups = groupByEffectReach(pending, detCtx);
       for (const group of groups) {
-        for (const s of group) {
-          detonatedUids.add(s.uid);
-          specialsDetonated.push(s.kind);
-        }
-        const d = detonate(group, { board, fallbackColor: placedColor });
+        for (const s of group) detonatedUids.add(s.uid);
+        const d = detonate(group, detCtx);
         detonations.push(d);
         for (const i of d.cells) detonationCells.add(i);
       }
@@ -128,15 +122,7 @@ export function resolveBoard(board: Board, opts: ResolveOptions = {}): Resolutio
       removed.push({ index: i, cell: snapshot(cell), source: source.get(i) ?? 'line' });
       board.clearAt(i);
     }
-    if (spawn) {
-      board.putSpecial(spawn.index, spawn.kind, spawn.uid, spawn.color, spawn.dir);
-      specialsCreated.push(spawn.kind);
-    }
-
-    for (const l of lines) {
-      if (l.kind === 'row') rowsCleared++;
-      else colsCleared++;
-    }
+    if (spawn) board.putSpecial(spawn.index, spawn.kind, spawn.uid, spawn.color, spawn.dir);
 
     events.push({
       chainIndex,
@@ -152,8 +138,33 @@ export function resolveBoard(board: Board, opts: ResolveOptions = {}): Resolutio
     pending = [...next.values()].sort((a, b) => a.index - b.index);
   }
 
+  return summarizeEvents(events, aborted);
+}
+
+/**
+ * event 列から resolution 全体の集計を作る。
+ *
+ * **resolveBoard の戻り値もこれで作る。** そうしておくと「先頭 n wave までの集計」
+ * （＝演出の途中経過）と最終結果が必ず同じ数え方になり、ズレようがない。
+ * 表示側の都合はここへ持ちこまない。あくまで event の集計だけを行う。
+ */
+export function summarizeEvents(events: readonly ResolutionEvent[], aborted = false): ResolutionResult {
+  let rowsCleared = 0;
+  let colsCleared = 0;
+  const specialsCreated: SpecialKind[] = [];
+  const specialsDetonated: SpecialKind[] = [];
+
+  for (const e of events) {
+    for (const l of e.lines) {
+      if (l.kind === 'row') rowsCleared++;
+      else colsCleared++;
+    }
+    for (const d of e.detonations) for (const s of d.group) specialsDetonated.push(s.kind);
+    if (e.spawned) specialsCreated.push(e.spawned.kind);
+  }
+
   return {
-    events,
+    events: [...events],
     maxChain: events.length,
     totalScore: events.reduce((a, e) => a + e.score, 0),
     totalCleared: events.reduce((a, e) => a + e.removed.length, 0),

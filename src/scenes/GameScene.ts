@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { Board } from '../game/Board';
-import { StageState } from '../game/StageState';
+import { StageState, type Presentation } from '../game/StageState';
 import { stageById } from '../data/stages';
 import type { TutorialHint } from '../data/stages';
 import type { Cell, Piece, ResolutionEvent, ResolutionResult } from '../game/types';
@@ -22,8 +22,9 @@ const TIMING = {
 const DRAG_LIFT = 1.15;
 
 export interface SceneHooks {
-  /** 盤面 / HUD の再描画が必要になったとき。 */
-  onUpdate(state: StageState, chainNow: number): void;
+  /** 盤面 / HUD の再描画が必要になったとき。
+   *  `shown` は演出の進みに合わせた**表示用**の途中経過（論理状態とは別物）。 */
+  onUpdate(state: StageState, chainNow: number, shown: Presentation): void;
   /** ステージ開始時（intro 表示のきっかけ）。 */
   onStageStart(state: StageState): void;
   /** クリア / 失敗が確定したとき。 */
@@ -65,6 +66,8 @@ export class GameScene extends Phaser.Scene {
   private fading: FadingCell[] = [];
   private flashes: Flash[] = [];
   private chainNow = 0;
+  /** HUD へ出してよい wave 数。演出が1波進むごとに増える（論理状態は先に確定している）。 */
+  private shownWaves = 0;
   private hint: TutorialHint | null = null;
 
   constructor(hooks: SceneHooks) {
@@ -105,9 +108,10 @@ export class GameScene extends Phaser.Scene {
     this.fading = [];
     this.flashes = [];
     this.chainNow = 0;
+    this.shownWaves = 0;
     this.refreshHint();
     this.hooks.onStageStart(this.state);
-    this.hooks.onUpdate(this.state, this.chainNow);
+    this.emit();
   }
 
   retry(): void {
@@ -118,8 +122,9 @@ export class GameScene extends Phaser.Scene {
     this.fading = [];
     this.flashes = [];
     this.chainNow = 0;
+    this.shownWaves = 0;
     this.refreshHint();
-    this.hooks.onUpdate(this.state, this.chainNow);
+    this.emit();
   }
 
   get stageState(): StageState {
@@ -147,9 +152,14 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** 表示側への通知。**論理状態ではなく、演出の進みに合わせた途中経過を渡す。** */
+  private emit(): void {
+    this.hooks.onUpdate(this.state, this.chainNow, this.state.presentation(this.shownWaves));
+  }
+
   private refreshHint(): void {
     // ヒントの中身は main.ts の TutorialOverlay が決める。ここでは再問い合わせを促すだけ。
-    this.hooks.onUpdate(this.state, this.chainNow);
+    this.emit();
   }
 
   // ------------------------------------------------------------------- input
@@ -221,8 +231,10 @@ export class GameScene extends Phaser.Scene {
     if (!outcome.ok) return;
 
     // 表示用の盤面にも同じ配置を反映する（resolution は event を追って適用する）。
+    // スコアと目的は、この時点ではまだ 1 波も出さない（演出より先に結果を見せないため）。
+    this.shownWaves = 0;
     this.view.place(piece.shape.cells, row, col, piece.color);
-    this.hooks.onUpdate(this.state, this.chainNow);
+    this.emit();
 
     if (outcome.result && outcome.result.events.length > 0) this.playResolution(outcome.result);
     else this.finishTurn();
@@ -265,7 +277,7 @@ export class GameScene extends Phaser.Scene {
       this.chainText.setText(`CHAIN ${ev.chainIndex}`);
       this.chainText.setAlpha(1);
     }
-    this.hooks.onUpdate(this.state, this.chainNow);
+    this.emit();
   }
 
   private applyEvent(ev: ResolutionEvent): void {
@@ -280,7 +292,8 @@ export class GameScene extends Phaser.Scene {
       const s = ev.spawned;
       this.view.putSpecial(s.index, s.kind, s.uid, s.color, s.dir);
     }
-    this.hooks.onUpdate(this.state, this.chainNow);
+    this.shownWaves = ev.chainIndex;
+    this.emit();
   }
 
   /** 念のため論理盤面と表示盤面を突き合わせる（ズレたら論理盤面を正とする）。 */
@@ -289,7 +302,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private finishTurn(): void {
-    this.hooks.onUpdate(this.state, this.chainNow);
+    this.emit();
     if (this.state.status !== 'playing') this.hooks.onStageEnd(this.state);
   }
 
