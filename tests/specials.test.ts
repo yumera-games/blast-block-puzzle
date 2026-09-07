@@ -9,6 +9,51 @@ const EMPTY = '........';
 const rows = (map: Record<number, string>): string[] =>
   Array.from({ length: 8 }, (_, i) => map[i] ?? EMPTY);
 
+describe('ROCKET の 向き決定ルール（pickRocketDirection 1 か所に閉じる）', () => {
+  /** 2 ライン同時完成で生まれた Rocket の向きを読む。 */
+  const spawnDir = (lines: readonly string[], shape: string, color: Color, row: number, col: number) => {
+    const { result } = playOne(lines, shape, color, row, col);
+    const sp = result.events[0]!.spawned!;
+    expect(sp.kind).toBe('rocket');
+    return { dir: sp.dir, lines: result.events[0]!.lines };
+  };
+
+  it('行だけを 2 本 同時に消すと たて向き（v）', () => {
+    const r = spawnDir(rows({ 6: 'RBYGPRB.', 7: 'BYGPRBY.' }), 'v2', 'blue', 6, 7);
+    expect(r.lines.every((l) => l.kind === 'row')).toBe(true);
+    expect(r.dir).toBe('v');
+  });
+
+  it('列だけを 2 本 同時に消すと よこ向き（h）', () => {
+    const r = spawnDir(
+      rows({ 0: 'RB......', 1: 'BY......', 2: 'YG......', 3: 'GP......',
+             4: 'PR......', 5: 'RB......', 6: 'BY......' }),
+      'h2', 'green', 7, 0,
+    );
+    expect(r.lines.every((l) => l.kind === 'col')).toBe(true);
+    expect(r.dir).toBe('h');
+  });
+
+  it('行と列を 1 本ずつ 同時に消すと よこ向き（h）— 8x8 では行も列も 8 マスで同数のため', () => {
+    const r = spawnDir(
+      rows({ 0: 'Y.......', 1: 'G.......', 2: 'P.......', 3: 'R.......',
+             4: 'B.......', 5: 'Y.......', 6: 'G.......', 7: '.RBYGPRB' }),
+      'dot', 'purple', 7, 0,
+    );
+    expect(r.lines.filter((l) => l.kind === 'row').length).toBe(1);
+    expect(r.lines.filter((l) => l.kind === 'col').length).toBe(1);
+    expect(r.dir).toBe('h');
+  });
+
+  it('向きは効果範囲に直結する（v は列、h は行を消す）', () => {
+    const v = playOne(rows({ 0: '..Y.....', 7: 'RB^YGPR.' }), 'dot', 'blue', 7, 7).result;
+    const h = playOne(rows({ 7: 'RB>YGPR.', 0: '..Y.....' }), 'dot', 'blue', 7, 7).result;
+    const cells = (r: typeof v) => r.events[1]!.detonations[0]!.cells;
+    expect(new Set(cells(v).map((i) => i % 8)).size).toBe(1);          // 列 2 に閉じる
+    expect(new Set(cells(h).map((i) => Math.floor(i / 8))).size).toBe(1); // 行 7 に閉じる
+  });
+});
+
 describe('特殊ピースの起爆', () => {
   it('巻きこまれなければ起爆しない（タップでは起動しない）', () => {
     const { board, result } = playOne(rows({ 7: 'RB^YGP..' }), 'dot', 'blue', 0, 0);

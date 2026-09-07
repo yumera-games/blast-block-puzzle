@@ -8,7 +8,9 @@ import { LAYOUT_UNITS, computeLayout, type Layout } from '../src/ui/layout';
  * 実測（Phase 2A の 393x852 / 320x568）に合わせた近似値で確かめる。
  */
 const AVAIL = {
+  '430x932': { w: 414, h: 750 },
   '393x852': { w: 377, h: 680 },
+  '375x667': { w: 359, h: 500 },
   '320x568': { w: 304, h: 400 },
 } as const;
 
@@ -41,6 +43,20 @@ describe('レイアウト（予告ストリップ）', () => {
       expect(l.stripY, key).toBeGreaterThanOrEqual(0);
       expect(l.stripY + l.stripH, key).toBeLessThanOrEqual(l.height);
       expect(l.boardX + l.boardW, key).toBeLessThanOrEqual(l.width);
+    }
+  });
+
+  it('320 / 375 / 393 / 430px のどの幅でも canvas が利用可能領域に収まる', () => {
+    for (const key of Object.keys(AVAIL) as (keyof typeof AVAIL)[]) {
+      const a = AVAIL[key];
+      const l = computeLayout(a.w, a.h, 2);
+      expect(l.cssWidth, key).toBeLessThanOrEqual(a.w);
+      expect(l.cssHeight, key).toBeLessThanOrEqual(a.h);
+      // 8x8 とトレイ 3 枠が保たれる（操作できる最低条件）
+      expect(l.boardW, key).toBe(BALANCE.board.cols * l.cell);
+      expect(l.boardH, key).toBe(BALANCE.board.rows * l.cell);
+      expect(l.cell / l.dpr, key).toBeGreaterThanOrEqual(16);
+      expect(l.trayY + l.trayH, key).toBeLessThanOrEqual(l.height);
     }
   });
 

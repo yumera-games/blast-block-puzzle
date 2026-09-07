@@ -61,13 +61,26 @@ describe('プレイ計測（メモリ上のみ）', () => {
     }
   });
 
-  it('わなを選んだ挑戦は combo 0・単独起爆 1 として残る', () => {
+  it('単独起爆で終わった挑戦は combo 0・単独起爆 1 として残る', () => {
+    // 相手の居ない BOMB を巻きこむだけの盤面。COMBO 目的は進まない。
+    const solo = {
+      ...stageById(11),
+      id: 904,
+      initialBoard: [
+        '........', '........', '........', 'RBY*GPR.',
+        '........', '........', '........', '........',
+      ],
+      fixedSets: [[{ shape: 'dot', color: 'blue' as const }, { shape: 'h2', color: 'red' as const }, { shape: 'h3', color: 'green' as const }]],
+      moves: 6,
+      objectives: [{ kind: 'combo' as const, target: 1, label: 'any' }],
+      tutorial: { showGuide: false },
+    };
     const m = new PlayMetrics();
-    const st = new StageState(stageById(11));
-    m.begin(11, false);
-    const pv = previewPlacement(st.board, st.tray[0]!, 2, 7);
-    m.onPreview('0:2:7', pv);
-    const out = st.place(0, 2, 7);
+    const st = new StageState(solo);
+    m.begin(904, false);
+    const pv = previewPlacement(st.board, st.tray[0]!, 3, 7);
+    m.onPreview('0:3:7', pv);
+    const out = st.place(0, 3, 7);
     m.onPlaced(st, out.result ?? null, pv);
 
     const a = parse(m)[0]!;

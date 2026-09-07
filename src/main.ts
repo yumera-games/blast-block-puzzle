@@ -140,6 +140,8 @@ function showClear(state: StageState): void {
   showCard({
     title: 'STAGE CLEAR',
     titleClass: 'ok',
+    // 教材ステージだけ「いま盤面で何が起きたか」を答え合わせする。文言はステージデータ側。
+    body: state.def.tutorial.outro,
     stats: `SCORE ${state.score}   MOVES USED ${state.movesUsed}   MAX CHAIN ${state.maxChain}`,
     buttons: isLast
       ? [

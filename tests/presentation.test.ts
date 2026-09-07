@@ -36,7 +36,7 @@ describe('resolution の集計', () => {
 });
 
 describe('演出中の表示は wave 単位で進む', () => {
-  /** Stage 10 は 1 手で 3 wave 進むので、途中経過の検証に使える。 */
+  /** Stage 10 は 1 手で 2 wave 進む（wave1 ライン消去 → wave2 COMBO）。 */
   const stage10 = () => {
     const st = new StageState(stageById(10));
     st.place(0, 7, 2);
@@ -69,15 +69,27 @@ describe('演出中の表示は wave 単位で進む', () => {
     expect(st.presentation(waveScores.length).score).toBe(st.score);
   });
 
-  it('目的は成立した wave まで再生して初めて点く（COMBO は wave2 / CHAIN3 は wave3）', () => {
+  it('目的は成立した wave まで再生して初めて点く（COMBO は wave2）', () => {
     const st = stage10();
     const done = (n: number) => st.presentation(n).objectives.map((o) => o.done);
-    expect(st.def.objectives.map((o) => o.kind)).toEqual(['combo', 'chain']);
-    expect(done(0)).toEqual([false, false]);
-    expect(done(1)).toEqual([false, false]); // ライン消去だけ。まだ何も成立していない
-    expect(done(2)).toEqual([true, false]);  // rocket+bomb の COMBO が成立
-    expect(done(3)).toEqual([true, true]);   // 3 wave 目まで進んで CHAIN 3
-    expect(st.presentation(3).settled).toBe(true);
+    expect(st.def.objectives.map((o) => o.kind)).toEqual(['combo']);
+    expect(done(0)).toEqual([false]);
+    expect(done(1)).toEqual([false]); // ライン消去だけ。COMBO はまだ成立していない
+    expect(done(2)).toEqual([true]);  // rocket+bomb の COMBO が成立
+    expect(st.presentation(2).settled).toBe(true);
+    expect(st.lastResult!.events.length).toBe(2);
+  });
+
+  it('Stage 12（案内なし）でも、目的は成立した wave まで先出ししない', () => {
+    const st = new StageState(stageById(12));
+    st.place(0, 0, 3);
+    st.place(1, 0, 0);
+    st.place(2, 0, 4);
+    const done = (n: number) => st.presentation(n).objectives.map((o) => o.done);
+    expect(done(0)).toEqual([false]);
+    expect(done(1)).toEqual([false]);
+    expect(done(2)).toEqual([true]);
+    expect(st.presentation(2).settled).toBe(true);
   });
 
   it('最終 wave まで再生すれば、表示は論理状態と完全に一致する', () => {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Board } from '../src/game/Board';
 import { COMBO_EFFECTS, COMBO_NAMES, comboName, comboPreviewLabel, isComboEffect } from '../src/data/combos';
 import { stageById } from '../src/data/stages';
 import { shapeById } from '../src/data/pieces';
@@ -119,13 +120,24 @@ describe('ドラッグ予告（preview）', () => {
   });
 
   it('単独起爆になる配置では combo 予告を出さない', () => {
-    const st = new StageState(stageById(11));
-    // わな: 行 3 を埋めると BOMB が単独起爆する
-    const pv = previewPlacement(st.board, st.tray[0]!, 2, 7)!;
+    // 相手の居ない BOMB。行をそろえると巻きこまれるが、届く先に特殊が無い。
+    const board = Board.fromStrings(rows({ 3: 'RBY*GPR.' }));
+    const pv = previewPlacement(board, { shape: shapeById('dot'), color: 'blue', uid: 999 }, 3, 7)!;
     expect(pv.effect).toBeNull();
     expect(comboName(pv.effect)).toBeNull();
-    expect(pv.triggerCells).toEqual([st.board.idx(3, 3)]); // BOMB は巻きこまれる
-    expect(pv.comboCells).toEqual([]);                     // 相手は居ない
+    expect(pv.triggerCells).toEqual([board.idx(3, 3)]); // BOMB は巻きこまれる
+    expect(pv.comboCells).toEqual([]);                  // 相手は居ない
+  });
+
+  it('Stage 12 でも、想定解の 3 手目だけ combo 予告が出る', () => {
+    const st = new StageState(stageById(12));
+    st.place(0, 0, 3);
+    st.place(1, 0, 0);
+    const pv = previewPlacement(st.board, st.tray[2]!, 0, 4)!;
+    expect(pv.effect).toBe('rocket+bomb');
+    expect(pv.comboCells).toEqual([st.board.idx(5, 3)]); // 取り込まれる BOMB
+    // 別の場所ではラベルを出さない
+    expect(previewPlacement(st.board, st.tray[2]!, 4, 0)!.effect).toBeNull();
   });
 
   it('起爆が起きない配置ではライン予告だけになる', () => {

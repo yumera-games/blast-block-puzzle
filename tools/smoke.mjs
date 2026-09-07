@@ -8,7 +8,7 @@
  *   ② 320〜430px 幅で縦横にはみ出さない
  *   ③ 盤面とトレイが画面内に収まる
  *   ④ 実際にドラッグして配置できる（マウスとタッチの両方）
- *   ⑤ Stage 1〜11 を順に読み込める
+ *   ⑤ Stage 1〜12 を順に読み込める
  *   ⑥ debug 表示を ON / OFF できる
  */
 import { existsSync } from 'fs';
@@ -160,8 +160,8 @@ const after = await page.evaluate(() => window.__blast.state().board.join(''));
 if (before !== after) ng.push('occupied セルへドラッグしたのに配置されてしまった');
 else note.push('  配置不可の位置へ落としても盤面が変わらない');
 
-// ⑤ Stage 1〜10 を順に読み込む
-for (let id = 1; id <= 11; id++) {
+// ⑤ Stage 1〜12 を順に読み込む
+for (let id = 1; id <= 12; id++) {
   await page.evaluate((n) => window.__blast.goStage(n), id);
   await page.waitForTimeout(160);
   const s = await page.evaluate(() => window.__blast.state());
@@ -169,7 +169,7 @@ for (let id = 1; id <= 11; id++) {
   if (s.status !== 'playing') ng.push(`Stage ${id} が開始直後に ${s.status} になっている`);
   if (s.objectives.length === 0) ng.push(`Stage ${id} に objective がない`);
 }
-note.push('  Stage 1〜11 をすべて読み込めた');
+note.push('  Stage 1〜12 をすべて読み込めた');
 
 // ⑥ debug の ON/OFF
 const dbgOn = await page.evaluate(() => {
@@ -183,7 +183,7 @@ const dbgOff = await page.evaluate(() => {
 if (!dbgOn || dbgOff) ng.push('debug 表示を ON/OFF できない');
 else note.push('  debug 表示を ON/OFF できた');
 
-/* ------------------------------- Stage 1〜10 を実際にドラッグして通しプレイ ---- */
+/* ------------------------------- Stage 1〜12 を実際にドラッグして通しプレイ ---- */
 const SOLUTIONS = {
   1: [[0, 7, 7]],
   2: [[0, 7, 7], [1, 6, 0]],
@@ -196,6 +196,7 @@ const SOLUTIONS = {
   9: [[0, 7, 4], [1, 7, 0], [2, 7, 5]],
   10: [[0, 7, 2]],
   11: [[0, 6, 3], [1, 6, 0], [2, 6, 4]],
+  12: [[0, 0, 3], [1, 0, 0], [2, 0, 4]],
 };
 
 async function waitIdle() {
@@ -211,7 +212,7 @@ async function closeCard() {
 }
 
 const played = [];
-for (let id = 1; id <= 11; id++) {
+for (let id = 1; id <= 12; id++) {
   await page.evaluate((n) => window.__blast.goStage(n), id);
   await page.waitForTimeout(200);
   await closeCard();
@@ -251,13 +252,20 @@ for (let id = 1; id <= 11; id++) {
     ng.push('Stage 8: Rocket の生成 or 起爆が起きていない');
   if (id === 9 && !(acc.blast >= 11 && acc.detonated.includes('bomb')))
     ng.push('Stage 9: 11セル COLOR BLAST or Bomb 起爆が起きていない');
-  if (id === 10 && acc.maxChain < 3) ng.push('Stage 10: CHAIN 3 に届いていない');
+  // Stage 10 は COMBO だけを教える教材にしたので、CHAIN は 2 で止まるのが正しい。
+  if (id === 10 && acc.maxChain !== 2) ng.push(`Stage 10: CHAIN が 2 で止まっていない (${acc.maxChain})`);
   if (id === 10 && !acc.effects.includes('rocket+bomb'))
     ng.push('Stage 10: 効果到達型 combo (rocket+bomb) が起きていない');
-  if (id === 10 && !(acc.waveScores.length === 3 && acc.waveScores.every((v) => v > 0)))
+  if (id === 10 && !(acc.waveScores.length === 2 && acc.waveScores.every((v) => v > 0)))
     ng.push(`Stage 10: wave ごとのスコアが積み上がっていない (${acc.waveScores})`);
   if (id === 11 && !acc.effects.some((e) => e.includes('+')))
     ng.push('Stage 11: 特殊 x 特殊 の COMBO が起きていない');
+  if (id === 11 && !acc.created.includes('rocket'))
+    ng.push('Stage 11: BOMB を残したまま ROCKET を作る手順になっていない');
+  if (id === 12 && !acc.effects.some((e) => e.includes('+')))
+    ng.push('Stage 12: 特殊 x 特殊 の COMBO が起きていない');
+  if (id === 12 && !acc.created.includes('rocket'))
+    ng.push('Stage 12: ROCKET を作る手順になっていない');
 
   await closeCard();
 }

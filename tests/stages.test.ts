@@ -60,17 +60,22 @@ const SOLUTIONS: Record<number, Move[]> = {
     { t: 1, r: 7, c: 0 }, // h4
     { t: 2, r: 7, c: 5 }, // h3 → 行 7 完成、Bomb を巻きこむ
   ],
-  10: [{ t: 0, r: 7, c: 2 }], // 行 7 → ROCKET 単独起爆 → 射線が BOMB へ届いて combo → CHAIN 3
+  10: [{ t: 0, r: 7, c: 2 }], // 行 7 → ROCKET が巻きこまれ、射線が BOMB へ届いて COMBO（CHAIN 2）
   11: [
     { t: 0, r: 6, c: 3 }, // v2 → 行 6・7 同時完成 → たて ROCKET（列 3 に向く）
     { t: 1, r: 6, c: 0 }, // h3 → 行 6 を埋める
     { t: 2, r: 6, c: 4 }, // h4 → 行 6 完成 → ROCKET の射線が BOMB(3,3) へ届いて COMBO
   ],
+  12: [
+    { t: 0, r: 0, c: 3 }, // v2 → 行 0・1 同時完成 → たて ROCKET（列 3 に向く）
+    { t: 1, r: 0, c: 0 }, // h3 → 行 0 を埋める
+    { t: 2, r: 0, c: 4 }, // h4 → 行 0 完成 → ROCKET の射線が BOMB(5,3) へ届いて COMBO
+  ],
 };
 
 describe('ステージデータの健全性', () => {
-  it('Stage 1〜11 が定義されている', () => {
-    expect(STAGES.map((s) => s.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  it('Stage 1〜12 が定義されている', () => {
+    expect(STAGES.map((s) => s.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   });
 
   it('seed は全ステージで固定されている', () => {
@@ -91,13 +96,20 @@ describe('ステージデータの健全性', () => {
     }
   });
 
-  it('ガイドを常時表示するのは基本操作の Stage 1〜3 と、手順が 3 手ある Stage 5 だけ', () => {
-    const withGuide = new Set([1, 2, 3, 5]);
+  it('ガイドを常時表示するのは基本操作 (1〜3) と教材ステージ (5・8・10・11) だけ', () => {
+    // Stage 12 は転移確認なのでガイドを出さない。
+    const withGuide = new Set([1, 2, 3, 5, 8, 10, 11]);
     for (const s of STAGES) expect(s.tutorial.showGuide, `stage ${s.id}`).toBe(withGuide.has(s.id));
   });
 
   it('新システム登場ステージには intro がある', () => {
-    for (const id of [5, 6, 8, 9, 10]) expect(stageById(id).tutorial.intro, `stage ${id}`).toBeTruthy();
+    for (const id of [5, 6, 8, 9, 10, 11]) expect(stageById(id).tutorial.intro, `stage ${id}`).toBeTruthy();
+  });
+
+  it('教材ステージには「何が起きたか」を答え合わせする outro がある', () => {
+    for (const id of [5, 8, 9, 10, 11]) expect(stageById(id).tutorial.outro, `stage ${id}`).toBeTruthy();
+    // 転移確認ステージは答えを一切出さない
+    expect(stageById(12).tutorial.outro).toBeUndefined();
   });
 
   it('同じ seed から同じ初期トレイが再現される', () => {
@@ -109,7 +121,7 @@ describe('ステージデータの健全性', () => {
   });
 });
 
-describe('Stage 1〜11 を想定解で通しプレイする', () => {
+describe('Stage 1〜12 を想定解で通しプレイする', () => {
   for (const stage of STAGES) {
     it(`Stage ${stage.id}: ${stage.name} をクリアできる`, () => {
       const st = play(stage.id, SOLUTIONS[stage.id]!);
@@ -198,48 +210,60 @@ describe('意図したルールが実際に発生する', () => {
     expect(st.status).toBe('cleared');
   });
 
-  it('Stage 10: 1 個の起爆が届いた相手を取り込んで combo になり、CHAIN 3 まで伸びる', () => {
+  it('Stage 10: COMBO だけを教える。CHAIN は 2 で止まり、CHAIN objective も無い', () => {
     const st = play(10, SOLUTIONS[10]!);
     const r = st.lastResult!;
-    expect(r.maxChain).toBe(3);
+
+    // CHAIN と COMBO を切り分けるため、3 個目の ROCKET を外して wave を 2 で終わらせた。
+    expect(r.maxChain).toBe(2);
+    expect(r.events.length).toBe(2);
 
     // wave1: ライン消去だけ。巻きこまれる特殊は ROCKET 1 個で、まだ起爆はしない。
     expect(r.events[0]!.detonations.length).toBe(0);
 
-    // wave2: その ROCKET が単独で起爆待ちになり、射線上の BOMB を取り込んで combo になる。
+    // wave2: その ROCKET が起爆待ちになり、射線上の BOMB を取り込んで combo になる。
     const w2 = r.events[1]!.detonations;
     expect(w2.length).toBe(1);
     expect(w2[0]!.effect).toBe('rocket+bomb');
     expect(w2[0]!.group.map((g) => g.kind)).toEqual(['bomb', 'rocket']);
 
-    // wave3: combo の十字が届いた先の ROCKET。取り込みではなく連鎖として次の wave になる。
-    const w3 = r.events[2]!.detonations;
-    expect(w3.length).toBe(1);
-    expect(w3[0]!.effect).toBe('rocket');
-    expect(w3[0]!.group.length).toBe(1);
-
-    // 二重起爆していない（3 個の特殊がそれぞれ 1 回だけ）
+    // 二重起爆していない（2 個の特殊がそれぞれ 1 回だけ）
     const uids = r.events.flatMap((e) => e.detonations.flatMap((d) => d.group.map((g) => g.uid)));
-    expect(uids.length).toBe(3);
-    expect(new Set(uids).size).toBe(3);
+    expect(uids.length).toBe(2);
+    expect(new Set(uids).size).toBe(2);
     expect(r.aborted).toBe(false);
 
     // スコアは wave ごとに積み上がる（どの wave も 0 点で終わらない）
     for (const e of r.events) expect(e.score).toBeGreaterThan(0);
 
-    // 目的は ROCKET+BOMB COMBO と CHAIN 3 の 2 本立て
-    expect(st.def.objectives.map((o) => o.kind)).toEqual(['combo', 'chain']);
+    // 目的は COMBO だけ。CHAIN objective は置かない（同時達成すると区別を学べない）。
+    expect(st.def.objectives.map((o) => o.kind)).toEqual(['combo']);
+    expect(st.def.objectives.some((o) => o.kind === 'chain')).toBe(false);
     expect(st.def.objectives[0]!.effect).toBe('rocket+bomb');
     expect(st.objectiveProgress().every((o) => o.done)).toBe(true);
   });
 
-  it('Stage 11: 初期状態ではクリア済みでない', () => {
-    const st = new StageState(stageById(11));
-    expect(st.status).toBe('playing');
-    expect(st.objectiveProgress().every((o) => o.done)).toBe(false);
-    expect(st.def.tutorial.showGuide).toBe(false);
-    // 答えを書いた intro は付けない（自力で移せるかを見るため）
-    expect(st.def.tutorial.intro).toBeUndefined();
+  it('Stage 5 と Stage 10 は同じ CHAIN 2 でも、COMBO の有無が違う', () => {
+    const solo = play(5, SOLUTIONS[5]!);
+    const combo = play(10, SOLUTIONS[10]!);
+    const groups = (st: StageState) =>
+      st.lastResult!.events.flatMap((e) => e.detonations.filter((d) => d.group.length >= 2));
+
+    expect(solo.lastResult!.maxChain).toBe(2);
+    expect(combo.lastResult!.maxChain).toBe(2);
+    // 単独起爆でも CHAIN 2 は起きる。COMBO かどうかは起爆した特殊の数で決まる。
+    expect(groups(solo).length).toBe(0);
+    expect(groups(combo).length).toBe(1);
+  });
+
+  it('Stage 11 は「特殊を残す」ことを文章で教えるガイド付き教材', () => {
+    const t = stageById(11).tutorial;
+    expect(t.showGuide).toBe(true);
+    expect(t.hints?.length).toBe(3);
+    // 「残す」という判断を intro で明示する（Stage 5・8・9 の「起爆させる」と逆なので）
+    expect(t.intro).toContain('残し');
+    expect(t.intro).toContain('COMBO');
+    expect(t.outro).toContain('COMBO');
   });
 
   it('Stage 11: 想定解では ROCKET を作って残し、BOMB へ届かせて COMBO になる', () => {
@@ -261,20 +285,161 @@ describe('意図したルールが実際に発生する', () => {
     expect(st.status).toBe('cleared');
   });
 
-  it('Stage 11: 孤立 BOMB をすぐ単独起爆すると COMBO 目的へ届かなくなる', () => {
+  it('Stage 11: 1 手では BOMB を単独起爆させられない（無言の詰みを作らない）', () => {
+    // 行 3 の空きは (3,5) と (3,7) の 2 マスで連続していない。
+    // どのピースを 1 個置いても行 3 は完成せず、列 3 も 7 マス空いているので完成しない。
+    const root = new StageState(stageById(11));
+    for (let t = 0; t < root.tray.length; t++) {
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const st = new StageState(stageById(11));
+          if (!st.canPlace(t, r, c)) continue;
+          st.place(t, r, c);
+          expect(st.board.specialIndices().length, `t${t} r${r} c${c}`).toBeGreaterThanOrEqual(1);
+          expect(st.lastResult!.specialsDetonated, `t${t} r${r} c${c}`).not.toContain('bomb');
+        }
+      }
+    }
+  });
+
+  it('Stage 11: 代表的な誤操作（v2 を捨てる）でも、残り手数で立て直せる', () => {
     const st = new StageState(stageById(11));
-    // わな: 行 3 の残り 1 マスを埋めて BOMB を単独起爆させてしまう
-    const out = st.place(0, 2, 7);
-    expect(out.ok).toBe(true);
-    const dets = st.lastResult!.events[1]!.detonations;
-    expect(dets.length).toBe(1);
-    expect(dets[0]!.effect).toBe('bomb'); // combo ではない
-    expect(dets[0]!.group.length).toBe(1);
-    expect(st.objectiveProgress()[0]!.current).toBe(0);
-    // 盤面から特殊が消え、2セット目は横向きばかりなので行 6・7 を同時に消せない。
-    // ＝ もう特殊を作れず、COMBO 目的は達成不能になる。
-    expect(st.board.specialIndices().length).toBe(0);
-    expect(st.status).toBe('playing'); // まだ手数は残るが目的には届かない
+    // 誤操作: v2 を (5,3) へ置いてしまい、行 6 だけが単独で消える（特殊は生まれない）
+    st.place(0, 5, 3);
+    expect(st.lastResult!.specialsCreated.length).toBe(0);
+    expect(st.status).toBe('playing');
+
+    // 立て直し: 行 6 を作り直し、2 セット目の v2 で 行 6・7 を同時に消す
+    for (const m of [[1, 6, 0], [2, 6, 4], [0, 6, 3], [1, 6, 0], [2, 6, 4]] as const) {
+      const out = st.place(m[0], m[1], m[2]);
+      expect(out.ok, `move ${m}`).toBe(true);
+    }
+    expect(st.movesUsed).toBe(6);
+    expect(st.movesUsed).toBeLessThanOrEqual(stageById(11).moves);
+    expect(st.objectiveProgress()[0]!.current).toBe(1);
+    expect(st.status).toBe('cleared');
+  });
+
+  it('Stage 12: 案内なしの転移確認（intro もガイドも無い）', () => {
+    const st = new StageState(stageById(12));
+    expect(st.status).toBe('playing');
+    expect(st.objectiveProgress().every((o) => o.done)).toBe(false);
+    expect(st.def.tutorial.showGuide).toBe(false);
+    expect(st.def.tutorial.intro).toBeUndefined();
+    expect(st.def.tutorial.hints).toBeUndefined();
+    expect(st.def.objectives.map((o) => o.kind)).toEqual(['combo']);
+    // 特定の組み合わせに縛らない＝「特殊 x 特殊 なら何でも」
+    expect(st.def.objectives[0]!.effect).toBeUndefined();
+  });
+
+  it('Stage 12: 想定解で COMBO になり、二重起爆しない', () => {
+    const st = play(12, SOLUTIONS[12]!);
+    const r = st.lastResult!;
+    expect(r.maxChain).toBe(2);
+    const d = r.events[1]!.detonations[0]!;
+    expect(d.effect).toBe('rocket+bomb');
+    expect(d.group.length).toBe(2);
+
+    const uids = r.events.flatMap((e) => e.detonations.flatMap((g) => g.group.map((x) => x.uid)));
+    expect(uids.length).toBe(2);
+    expect(new Set(uids).size).toBe(2);
+    expect(st.status).toBe('cleared');
+  });
+
+  it('Stage 12: 1 手では BOMB を単独起爆させられない', () => {
+    const root = new StageState(stageById(12));
+    for (let t = 0; t < root.tray.length; t++) {
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const st = new StageState(stageById(12));
+          if (!st.canPlace(t, r, c)) continue;
+          st.place(t, r, c);
+          expect(st.lastResult!.specialsDetonated, `t${t} r${r} c${c}`).not.toContain('bomb');
+        }
+      }
+    }
+  });
+
+  it('Stage 12: 代表的な誤操作（行 1 だけ消す）後にも回復経路がある', () => {
+    const st = new StageState(stageById(12));
+    // 誤操作: v2 を (1,3) へ置いて 行 1 だけを消す（1 ライン＝特殊は生まれない）
+    st.place(0, 1, 3);
+    expect(st.lastResult!.events[0]!.lines.length).toBe(1);
+    expect(st.lastResult!.specialsCreated.length).toBe(0);
+    expect(st.status).toBe('playing');
+
+    // 立て直し: 行 1 を作り直し、2 セット目の v2 で 行 0・1 を同時に消す
+    for (const m of [[1, 1, 0], [2, 1, 4], [0, 0, 3], [1, 0, 0], [2, 0, 4]] as const) {
+      const out = st.place(m[0], m[1], m[2]);
+      expect(out.ok, `move ${m}`).toBe(true);
+    }
+    expect(st.movesUsed).toBe(6);
+    expect(st.movesUsed).toBeLessThanOrEqual(stageById(12).moves);
+    expect(st.objectiveProgress()[0]!.current).toBe(1);
+    expect(st.status).toBe('cleared');
+  });
+});
+
+describe('ROCKET の 向き（intro の説明とコードの挙動が一致する）', () => {
+  it('Stage 5: 行だけ 2 本 同時 → たて向き。intro も「たて向き」と書いてある', () => {
+    const st = new StageState(stageById(5));
+    st.place(0, 6, 7);
+    const spawn = st.lastResult!.events[0]!.spawned!;
+    expect(st.lastResult!.events[0]!.lines.every((l) => l.kind === 'row')).toBe(true);
+    expect(spawn.kind).toBe('rocket');
+    expect(spawn.dir).toBe('v');
+    expect(stageById(5).tutorial.intro).toContain('たて向き');
+    expect(stageById(5).tutorial.intro).not.toContain('よこ向きの ROCKET が 生まれます');
+  });
+
+  it('Stage 8: 行と列を 1 本ずつ 同時 → よこ向き。intro も「よこ向き」と書いてある', () => {
+    const st = new StageState(stageById(8));
+    st.place(0, 7, 0);
+    const ev = st.lastResult!.events[0]!;
+    const spawn = ev.spawned!;
+    expect(ev.lines.filter((l) => l.kind === 'row').length).toBe(1);
+    expect(ev.lines.filter((l) => l.kind === 'col').length).toBe(1);
+    expect(spawn.kind).toBe('rocket');
+    expect(spawn.dir).toBe('h');
+    expect(stageById(8).tutorial.intro).toContain('よこ向き');
+    expect(stageById(8).tutorial.intro).toContain('たて向き'); // Stage 5 との対比を書く
+  });
+
+  it('Stage 5 と Stage 8 で、同じ ROCKET でも消える向きが逆になる', () => {
+    const five = play(5, SOLUTIONS[5]!);
+    const eight = play(8, SOLUTIONS[8]!);
+    // たて向きは列 7 の残り 4 セル、よこ向きは行 7 の的を消す
+    expect(five.lastResult!.events[1]!.detonations[0]!.effect).toBe('rocket');
+    expect(eight.lastResult!.events[1]!.detonations[0]!.effect).toBe('rocket');
+    const cellsOf = (st: StageState) => st.lastResult!.events[1]!.detonations[0]!.cells;
+    const sameCol = (cs: readonly number[]) => new Set(cs.map((i) => i % 8)).size === 1;
+    const sameRow = (cs: readonly number[]) => new Set(cs.map((i) => Math.floor(i / 8))).size === 1;
+    expect(sameCol(cellsOf(five))).toBe(true);
+    expect(sameRow(cellsOf(eight))).toBe(true);
+  });
+});
+
+describe('回帰: 不正な配置は状態を動かさない', () => {
+  it('置けない場所へ落としても、盤面・トレイ・手数が変わらない', () => {
+    const st = new StageState(stageById(11));
+    const board = st.board.toStrings();
+    const tray = st.tray.map((p) => p && `${p.shape.id}:${p.color}`);
+    const moves = st.moves;
+    const seed = st.seed;
+
+    for (const [t, r, c] of [[0, 3, 0], [0, 7, 7], [1, 6, 1], [2, -1, 0], [0, 0, 9]] as const) {
+      expect(st.canPlace(t, r, c), `t${t} r${r} c${c}`).toBe(false);
+      const out = st.place(t, r, c);
+      expect(out.ok, `t${t} r${r} c${c}`).toBe(false);
+      expect(out.reason).toBe('illegal');
+    }
+
+    expect(st.board.toStrings()).toEqual(board);
+    expect(st.tray.map((p) => p && `${p.shape.id}:${p.color}`)).toEqual(tray);
+    expect(st.moves).toBe(moves);
+    expect(st.movesUsed).toBe(0);
+    expect(st.seed).toBe(seed);
+    expect(st.status).toBe('playing');
   });
 });
 
