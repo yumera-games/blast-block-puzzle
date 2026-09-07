@@ -4,7 +4,8 @@ import { StageState, type Presentation } from '../game/StageState';
 import { stageById } from '../data/stages';
 import type { TutorialHint } from '../data/stages';
 import type { Cell, Piece, ResolutionEvent, ResolutionResult } from '../game/types';
-import { comboName, comboPreviewLabel } from '../data/combos';
+import { comboPreviewLabel } from '../data/combos';
+import { waveNotice } from '../data/resultText';
 import { previewPlacement, type PreviewResult } from '../game/Preview';
 import { CELL_COLOR, CELL_EDGE, UI } from '../ui/colors';
 import { PieceTray } from '../ui/PieceTray';
@@ -71,6 +72,10 @@ export class GameScene extends Phaser.Scene {
   private comboNameText!: Phaser.GameObjects.Text;
   /** COMBO! の文字。CHAIN とは別の概念なので別の行に出す。 */
   private comboTagText!: Phaser.GameObjects.Text;
+  /** COMBO の意味（特殊 2個が いっしょに起爆！）。語だけでは伝わらないため添える。 */
+  private comboNoteText!: Phaser.GameObjects.Text;
+  /** CHAIN の意味（消去が 2回 つづいた！）。COMBO とは別の枠に出す。 */
+  private chainNoteText!: Phaser.GameObjects.Text;
   /** ドラッグ予告の説明ラベル。指で隠れないよう盤面の上端に置く。 */
   private previewText!: Phaser.GameObjects.Text;
 
@@ -103,7 +108,9 @@ export class GameScene extends Phaser.Scene {
         .setAlpha(0);
     this.comboNameText = centered('#ff9ede');
     this.comboTagText = centered('#ff6fc8');
+    this.comboNoteText = centered('#ffc7e8');
     this.chainText = centered('#ffd166');
+    this.chainNoteText = centered('#ffe4a8');
     this.previewText = this.add
       .text(0, 0, '', { fontFamily: 'ui-monospace, monospace', fontStyle: 'bold', color: '#cfe6ff' })
       .setOrigin(0.5, 0.5)
@@ -183,26 +190,52 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 中央表示の縦位置。COMBO 表示があるときは 3 行に積む。
-   *   ROCKET + BOMB   ← 組み合わせ名
-   *   COMBO!          ← 特殊 x 特殊 が成立したという合図
-   *   CHAIN 2         ← resolution が何 wave 続いたか（別概念）
+   * 中央表示の縦位置。**出ている行だけ**を上から順に積み、全体を盤面中央へ寄せる。
+   *   ROCKET + BOMB        ← 組み合わせ名
+   *   COMBO!               ← 特殊 x 特殊 が成立したという合図
+   *   特殊 2個が いっしょに起爆！ ← COMBO の意味
+   *   （ここだけ広く空ける。COMBO と CHAIN は別概念なので枠も分ける）
+   *   CHAIN 2              ← resolution が何 wave 続いたか
+   *   消去が 2回 つづいた！    ← CHAIN の意味
    */
   private layoutCenterTexts(): void {
     const l = this.layout;
     const cx = l.boardX + l.boardW / 2;
     const cy = l.boardY + l.boardH / 2;
-    const combo = this.comboTagText.alpha > 0;
-    this.comboNameText.setFontSize(Math.round(l.cell * 0.5));
-    this.comboTagText.setFontSize(Math.round(l.cell * 0.72));
-    this.chainText.setFontSize(Math.round(l.cell * 0.9));
-    this.comboNameText.setPosition(cx, cy - l.cell * 1.05);
-    this.comboTagText.setPosition(cx, cy - l.cell * 0.4);
-    this.chainText.setPosition(cx, combo ? cy + l.cell * 0.5 : cy);
+    // 行の並び。size はセル比の文字サイズ、gap は次の行とのすき間（セル比）。
+    const rows = [
+      { t: this.comboNameText, size: 0.5, gap: 0.1 },
+      { t: this.comboTagText, size: 0.72, gap: 0.1 },
+      { t: this.comboNoteText, size: 0.4, gap: 0.42 },
+      { t: this.chainText, size: 0.9, gap: 0.1 },
+      { t: this.chainNoteText, size: 0.4, gap: 0 },
+    ];
+    for (const r of rows) {
+      r.t.setFontSize(Math.max(9, Math.round(l.cell * r.size)));
+      this.fitToBoard(r.t);
+    }
+    const visible = rows.filter((r) => r.t.alpha > 0);
+    let total = 0;
+    visible.forEach((r, i) => {
+      total += r.t.displayHeight + (i < visible.length - 1 ? r.gap * l.cell : 0);
+    });
+    let y = cy - total / 2;
+    visible.forEach((r, i) => {
+      r.t.setPosition(cx, y + r.t.displayHeight / 2);
+      y += r.t.displayHeight + (i < visible.length - 1 ? r.gap * l.cell : 0);
+    });
+
     // 予告は盤面ではなく専用ストリップの中央へ置く。
     this.previewText.setFontSize(Math.max(9, Math.round(l.stripH * 0.62)));
     this.previewText.setPosition(cx, l.stripY + l.stripH / 2);
     this.fitPreviewText();
+  }
+
+  /** 中央表示が盤面幅を越えないよう縮める。 */
+  private fitToBoard(t: Phaser.GameObjects.Text): void {
+    t.setScale(1);
+    const maxW = this.layout.boardW - this.layout.cell * 0.3;
+    if (t.width > maxW && t.width > 0) t.setScale(maxW / t.width);
   }
 
   /** 長いラベルでも canvas 外へはみ出さないよう、盤面幅に収まるまで縮める。 */
@@ -215,9 +248,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private hideCenterTexts(): void {
-    this.comboNameText.setAlpha(0);
-    this.comboTagText.setAlpha(0);
-    this.chainText.setAlpha(0);
+    for (const t of [this.comboNameText, this.comboTagText, this.comboNoteText, this.chainText, this.chainNoteText])
+      t.setAlpha(0);
   }
 
   private refreshHint(): void {
@@ -372,23 +404,18 @@ export class GameScene extends Phaser.Scene {
     for (const d of ev.detonations) {
       this.flashes.push({ cells: d.cells, color: UI.detonation, until: this.time.now + TIMING.detonationFlash });
     }
-    // COMBO と CHAIN は別概念。combo 判定は Detonation.effect だけを見る（盤面は見ない）。
-    const combo = ev.detonations.map((d) => comboName(d.effect)).find((n) => n !== null) ?? null;
-    if (combo) {
-      this.comboNameText.setText(combo);
-      this.comboTagText.setText('COMBO!');
-      this.comboNameText.setAlpha(1);
-      this.comboTagText.setAlpha(1);
-    } else {
-      this.comboNameText.setAlpha(0);
-      this.comboTagText.setAlpha(0);
-    }
-    if (ev.chainIndex >= 2) {
-      this.chainText.setText(`CHAIN ${ev.chainIndex}`);
-      this.chainText.setAlpha(1);
-    } else {
-      this.chainText.setAlpha(0);
-    }
+    // COMBO と CHAIN は別概念。何を出すかは waveNotice が wave 単位で決める
+    // （ここで盤面を見たり combo を判定し直したりしない）。
+    const notice = waveNotice(ev);
+    const line = (t: Phaser.GameObjects.Text, text: string | null) => {
+      t.setText(text ?? '');
+      t.setAlpha(text ? 1 : 0);
+    };
+    line(this.comboNameText, notice.comboName);
+    line(this.comboTagText, notice.comboName ? 'COMBO!' : null);
+    line(this.comboNoteText, notice.comboNote);
+    line(this.chainText, notice.chainLabel);
+    line(this.chainNoteText, notice.chainNote);
     this.layoutCenterTexts();
     this.emit();
   }
@@ -441,7 +468,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     // チュートリアルの推奨配置
-    if (this.hint) this.drawHint(g, this.hint);
+    // showCell: false のヒントは文だけ出す（Stage 1 のような完全な答え表示にしない）。
+    if (this.hint && this.hint.showCell !== false) this.drawHint(g, this.hint);
 
     // 盤面のセル
     for (let i = 0; i < this.view.size; i++) {
@@ -483,18 +511,22 @@ export class GameScene extends Phaser.Scene {
    */
   private drawTextPlates(g: Phaser.GameObjects.Graphics): void {
     const pad = this.layout.cell * 0.22;
-    const shown = [this.comboNameText, this.comboTagText, this.chainText].filter((t) => t.alpha > 0);
-    if (shown.length > 0) {
+    // COMBO と CHAIN は別概念なので、**別々の板**に載せる（ひと続きに見せない）。
+    const plate = (texts: readonly Phaser.GameObjects.Text[]) => {
+      const shown = texts.filter((t) => t.alpha > 0);
+      if (shown.length === 0) return;
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const t of shown) {
-        x0 = Math.min(x0, t.x - t.width / 2);
-        y0 = Math.min(y0, t.y - t.height / 2);
-        x1 = Math.max(x1, t.x + t.width / 2);
-        y1 = Math.max(y1, t.y + t.height / 2);
+        x0 = Math.min(x0, t.x - t.displayWidth / 2);
+        y0 = Math.min(y0, t.y - t.displayHeight / 2);
+        x1 = Math.max(x1, t.x + t.displayWidth / 2);
+        y1 = Math.max(y1, t.y + t.displayHeight / 2);
       }
       g.fillStyle(UI.textPlate, 0.82);
       g.fillRect(x0 - pad, y0 - pad, x1 - x0 + pad * 2, y1 - y0 + pad * 2);
-    }
+    };
+    plate([this.comboNameText, this.comboTagText, this.comboNoteText]);
+    plate([this.chainText, this.chainNoteText]);
     if (this.previewText.alpha > 0) {
       // **専用ストリップの中だけ**を塗る。盤面セルへは 1px も重ねない。
       const l = this.layout;

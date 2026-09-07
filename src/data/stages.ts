@@ -40,6 +40,9 @@ export interface TutorialHint {
   readonly row: number;
   readonly col: number;
   readonly text?: string;
+  /** 盤面上の推奨セルを光らせるか。省略時 true。
+   *  false にすると**文だけ**出す＝「いまの目的」は伝えるが着地点は教えない。 */
+  readonly showCell?: boolean;
 }
 
 export interface StageTutorial {
@@ -369,7 +372,14 @@ export const STAGES: readonly StageDef[] = [
         'ここまでの CHAIN 2 は、どれも 起爆した 特殊が 1個だけでした。\n' +
         '\n' +
         '次は 特殊が 2個 いっしょに 起爆します。それが COMBO です。',
-      showGuide: false,
+      // 人間プレイ評価でここだけ初手 8 手を使い切って失敗した（preview 候補も最多）。
+      // 着地点は光らせず（showCell: false）、「いまの目的」だけを 1 行で出す。
+      showGuide: true,
+      hints: [
+        { move: 0, pieceIndex: 0, row: 7, col: 4, showCell: false, text: '赤の まとまりを ライン消去に つなげよう' },
+        { move: 1, pieceIndex: 1, row: 7, col: 0, showCell: false, text: 'BOMBの ある 行を うめていこう' },
+        { move: 2, pieceIndex: 2, row: 7, col: 5, showCell: false, text: '行が そろうと BOMBが 起爆する' },
+      ],
     },
   },
 
@@ -396,7 +406,7 @@ export const STAGES: readonly StageDef[] = [
     ],
     fixedSets: [[p('dot', 'green'), p('dot', 'purple'), p('dot', 'red')]],
     objectives: [
-      { kind: 'combo', target: 1, effect: 'rocket+bomb', label: 'ROCKET + BOMB の COMBO を 1回' },
+      { kind: 'combo', target: 1, effect: 'rocket+bomb', label: 'ROCKET と BOMB を いっしょに起爆（COMBO）' },
     ],
     tutorial: {
       intro:
@@ -466,23 +476,14 @@ export const STAGES: readonly StageDef[] = [
       // 立て直し用。1 セット目と同じ 3 種類なので、v2 を無駄にしても作り直せる。
       [p('v2', 'red'), p('h3', 'green'), p('h4', 'blue')],
     ],
-    objectives: [{ kind: 'combo', target: 1, label: '特殊 x 特殊 の COMBO を 1回' }],
+    objectives: [{ kind: 'combo', target: 1, label: 'BOMBを残して 特殊2個を いっしょに起爆' }],
     tutorial: {
       intro:
-        '盤面の BOMB は、まだ 起爆させません。\n' +
+        'BOMBを 今は 消さずに 残そう。\n' +
+        'あとで ROCKETと いっしょに 起爆すると COMBOに なるよ。\n' +
         '\n' +
-        'BOMB が 入った ラインを そろえると、BOMB は 1個だけで 起爆します。\n' +
-        'それでは いっしょに 起爆する 相手が 居ないので、COMBO に なりません。\n' +
-        '\n' +
-        'COMBO を 作る 手順は こうです。\n' +
-        '1. 盤面に ある 特殊を 残しておく\n' +
-        '2. そこへ 効果が 届く 向きの 特殊を もう1個 作る\n' +
-        '3. あとから 作った ほうを 巻きこんで 起爆させる\n' +
-        '\n' +
-        '下の 2行を 同時に 消せば、BOMB と 同じ 列に\n' +
-        'たて向きの ROCKET が 生まれます。\n' +
-        '\n' +
-        '特殊を すぐ 使わずに 残すことが、COMBO の 準備です。',
+        'COMBO＝特殊が 2個以上 いっしょに 起爆すること。\n' +
+        'BOMBを 先に 1個だけ 消してしまうと、相手が 居なくなる。',
       outro:
         'BOMB を 残して おいたので、ROCKET の 射線が 届き、\n' +
         '2個が いっしょに 起爆しました。これが COMBO です。\n' +
@@ -491,9 +492,9 @@ export const STAGES: readonly StageDef[] = [
         'その場合 CHAIN は 起きても COMBO には なりません。',
       showGuide: true,
       hints: [
-        { move: 0, pieceIndex: 0, row: 6, col: 3, text: '下の 2行を 同時に そろえます' },
-        { move: 1, pieceIndex: 1, row: 6, col: 0, text: 'ROCKET の 行を うめていきます' },
-        { move: 2, pieceIndex: 2, row: 6, col: 4, text: '行が そろうと 射線が BOMB へ 届きます' },
+        { move: 0, pieceIndex: 0, row: 6, col: 3, text: 'BOMBは 残す。下の 2行を 同時に そろえよう' },
+        { move: 1, pieceIndex: 1, row: 6, col: 0, text: 'BOMBは そのまま。ROCKETの 行を うめよう' },
+        { move: 2, pieceIndex: 2, row: 6, col: 4, text: 'ROCKETの 矢印を BOMBへ 届かせよう' },
       ],
     },
   },
@@ -529,7 +530,7 @@ export const STAGES: readonly StageDef[] = [
       [p('v2', 'blue'), p('h3', 'yellow'), p('h4', 'purple')],
       [p('v2', 'red'), p('h3', 'green'), p('h4', 'blue')],
     ],
-    objectives: [{ kind: 'combo', target: 1, label: '特殊 x 特殊 の COMBO を 1回' }],
+    objectives: [{ kind: 'combo', target: 1, label: '特殊2個を いっしょに起爆（COMBO）' }],
     // 答えは書かない。文字ヒントも intro も出さない。予告は既存仕様のまま。
     tutorial: { showGuide: false },
   },

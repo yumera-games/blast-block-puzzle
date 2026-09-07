@@ -96,10 +96,41 @@ describe('ステージデータの健全性', () => {
     }
   });
 
-  it('ガイドを常時表示するのは基本操作 (1〜3) と教材ステージ (5・8・10・11) だけ', () => {
+  it('ガイドを常時表示するのは基本操作 (1〜3) と教材ステージ (5・8・9・10・11) だけ', () => {
     // Stage 12 は転移確認なのでガイドを出さない。
-    const withGuide = new Set([1, 2, 3, 5, 8, 10, 11]);
+    const withGuide = new Set([1, 2, 3, 5, 8, 9, 10, 11]);
     for (const s of STAGES) expect(s.tutorial.showGuide, `stage ${s.id}`).toBe(withGuide.has(s.id));
+  });
+
+  it('Stage 9 のヒントは着地点を光らせず、文だけ出す', () => {
+    const t = stageById(9).tutorial;
+    expect(t.showGuide).toBe(true);
+    expect(t.hints?.length).toBe(3);
+    for (const h of t.hints ?? []) {
+      expect(h.showCell, `move ${h.move}`).toBe(false);
+      expect(h.text, `move ${h.move}`).toBeTruthy();
+    }
+    // 教材ステージのヒントは既定どおり着地点を光らせる（Stage 9 だけが例外）
+    for (const id of [1, 5, 8, 10, 11])
+      for (const h of stageById(id).tutorial.hints ?? [])
+        expect(h.showCell, `stage ${id} move ${h.move}`).not.toBe(false);
+  });
+
+  it('Stage 9 をガイド付きにしても、盤面・fixedSets・moves・想定解・スコアは変わらない', () => {
+    const def = stageById(9);
+    expect(def.moves).toBe(8);
+    expect(def.initialBoard).toEqual([
+      '........', '........', '........', '.RRR....',
+      '.RRR....', '.RRR....', '.RRBBB..', 'YRYB.GPB',
+    ]);
+    expect(def.fixedSets?.length).toBe(1);
+    expect(def.fixedSets?.[0]?.map((x) => `${x.shape}:${x.color}`)).toEqual([
+      'dot:yellow', 'h4:purple', 'h3:green',
+    ]);
+    const st = play(9, SOLUTIONS[9]!);
+    expect(st.status).toBe('cleared');
+    expect(st.score).toBe(344);
+    expect(st.movesUsed).toBe(3);
   });
 
   it('新システム登場ステージには intro がある', () => {
@@ -260,10 +291,50 @@ describe('意図したルールが実際に発生する', () => {
     const t = stageById(11).tutorial;
     expect(t.showGuide).toBe(true);
     expect(t.hints?.length).toBe(3);
-    // 「残す」という判断を intro で明示する（Stage 5・8・9 の「起爆させる」と逆なので）
-    expect(t.intro).toContain('残し');
+    // 「なぜ残すか」を 1 組の因果として出す（Stage 5・8・9 の「起爆させる」と逆なので）
+    expect(t.intro).toContain('残そう');
+    expect(t.intro).toContain('いっしょに 起爆');
     expect(t.intro).toContain('COMBO');
     expect(t.outro).toContain('COMBO');
+    // ROCKET 生成後のヒントでも「そのまま残す」と「矢印を届かせる」が読める
+    const hints = t.hints ?? [];
+    expect(hints[0]?.text).toContain('BOMBは 残す');
+    expect(hints[1]?.text).toContain('BOMBは そのまま');
+    expect(hints[2]?.text).toContain('届かせよう');
+  });
+
+  it('Stage 12 には Stage 11 の「残す」説明もヒントも出ない', () => {
+    const t = stageById(12).tutorial;
+    expect(t.intro).toBeUndefined();
+    expect(t.outro).toBeUndefined();
+    expect(t.hints).toBeUndefined();
+    expect(t.showGuide).toBe(false);
+    // Stage 11 の文言が混ざっていないこと
+    const eleven = stageById(11).tutorial;
+    expect(JSON.stringify(t)).not.toContain('残そう');
+    expect(eleven.intro).toContain('残そう');
+  });
+
+  it('objective の表示文だけを日本語化し、集計条件は変えない', () => {
+    const ten = stageById(10).objectives[0]!;
+    expect(ten.kind).toBe('combo');
+    expect(ten.effect).toBe('rocket+bomb'); // effect 指定は据え置き
+    expect(ten.target).toBe(1);
+    expect(ten.label).toBe('ROCKET と BOMB を いっしょに起爆（COMBO）');
+
+    const eleven = stageById(11).objectives[0]!;
+    expect(eleven.kind).toBe('combo');
+    expect(eleven.effect).toBeUndefined();
+    expect(eleven.label).toBe('BOMBを残して 特殊2個を いっしょに起爆');
+
+    const twelve = stageById(12).objectives[0]!;
+    expect(twelve.kind).toBe('combo');
+    expect(twelve.effect).toBeUndefined();
+    expect(twelve.label).toBe('特殊2個を いっしょに起爆（COMBO）');
+
+    // 文言を変えても達成判定は変わらない
+    expect(play(10, SOLUTIONS[10]!).objectiveProgress()[0]!.done).toBe(true);
+    expect(play(12, SOLUTIONS[12]!).objectiveProgress()[0]!.done).toBe(true);
   });
 
   it('Stage 11: 想定解では ROCKET を作って残し、BOMB へ届かせて COMBO になる', () => {
