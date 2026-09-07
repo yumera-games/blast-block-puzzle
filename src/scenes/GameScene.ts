@@ -3,9 +3,10 @@ import { Board } from '../game/Board';
 import { StageState, type Presentation } from '../game/StageState';
 import { stageById } from '../data/stages';
 import type { TutorialHint } from '../data/stages';
-import type { Cell, Piece, ResolutionEvent, ResolutionResult, SpecialInstance } from '../game/types';
+import type { Cell, Piece, ResolutionEvent, ResolutionResult } from '../game/types';
 import { comboPreviewLabel } from '../data/combos';
-import { TEACH_PROMPT, type TeachKind, waveMark, waveNotice } from '../data/resultText';
+import { type ComboLink, TEACH_PROMPT, type TeachKind, comboLinkOf, waveMark, waveNotice } from '../data/resultText';
+import { arrowEndpoints, cellCenter } from '../ui/teachDraw';
 import { previewPlacement, type PreviewResult } from '../game/Preview';
 import { CELL_COLOR, CELL_EDGE, UI } from '../ui/colors';
 import { PieceTray } from '../ui/PieceTray';
@@ -87,8 +88,8 @@ export class GameScene extends Phaser.Scene {
   private teach: readonly TeachKind[] = [];
   /** この resolution で振った wave 番号。1 wave = 1 個。 */
   private waveBadges: { index: number; wave: number }[] = [];
-  /** いっしょに起爆した特殊。枠と矢印で結ぶ。 */
-  private comboLink: { specials: readonly SpecialInstance[] } | null = null;
+  /** いっしょに起爆した特殊と、その因果の向き。 */
+  private comboLink: ComboLink | null = null;
   /** 教材表示を読ませるために演出を止めているあいだの解除関数。 */
   private teachHold: (() => void) | null = null;
   /** このステージで教材の一時停止をもう出したか（繰り返して邪魔にしない）。 */
@@ -529,8 +530,10 @@ export class GameScene extends Phaser.Scene {
       this.syncBadgeTexts();
     }
     if (this.teach.includes('comboLink')) {
-      const d = ev.detonations.find((x) => x.group.length >= 2);
-      if (d) this.comboLink = { specials: [...d.group] };
+      // 向きは comboLinkOf が消去記録から決める。**group の配列順は index 昇順なので
+      // 因果の向きではない**（そのまま使うと矢印が逆を向く）。
+      const link = comboLinkOf(ev);
+      if (link) this.comboLink = link;
     }
     this.layoutCenterTexts();
     this.emit();
@@ -669,7 +672,7 @@ export class GameScene extends Phaser.Scene {
     const now = this.time.now;
 
     // --- wave 番号。CHAIN の文字と同じ色にして盤面と中央表示を対応づける ---
-    const at = (i: number) => ({ x: this.cellX(i) + l.cell / 2, y: this.cellY(i) + l.cell / 2 });
+    const at = (i: number) => cellCenter(l, this.view.rowOf(i), this.view.colOf(i));
     for (let i = 1; i < this.waveBadges.length; i++) {
       this.arrow(g, at(this.waveBadges[i - 1]!.index), at(this.waveBadges[i]!.index), UI.lineHighlight, 0.85);
     }
@@ -685,9 +688,17 @@ export class GameScene extends Phaser.Scene {
     // --- COMBO。2 個を同じ枠・同じ色・同じ脈動で結ぶ ---
     if (this.comboLink) {
       const pulse = 0.5 + 0.5 * Math.abs(Math.sin(now / 260));
-      const sp = this.comboLink.specials;
-      for (let i = 1; i < sp.length; i++) this.arrow(g, at(sp[i - 1]!.index), at(sp[i]!.index), UI.previewCombo, pulse);
-      for (const x of sp) {
+      const link = this.comboLink;
+      if (link.directed) {
+        // 効果を届かせた側 → 取り込まれた側。先端は「届いた先」に付く。
+        for (const f of link.from)
+          for (const t of link.to) this.arrow(g, at(f.index), at(t.index), UI.previewCombo, pulse);
+      } else {
+        // 向きが定まらない（起爆待ちどうし）。**推測した向きは出さず**、線だけで結ぶ。
+        for (let i = 1; i < link.all.length; i++)
+          this.connector(g, at(link.all[i - 1]!.index), at(link.all[i]!.index), UI.previewCombo, pulse);
+      }
+      for (const x of link.all) {
         const px = this.cellX(x.index);
         const py = this.cellY(x.index);
         // すでに消えた側は残像で位置を示す。どれとどれが結ばれたのかを見せるため。
@@ -791,7 +802,7 @@ export class GameScene extends Phaser.Scene {
     return rows.length > 1 && rows[1] === rows[0]! + 1 ? rows[1]! : rows[0]!;
   }
 
-  /** from → to の矢印。セル中心どうしを結ぶので、両端をセル半分ぶん詰める。 */
+  /** from → to の矢印。始点は from のセル内、先端は to のセル内に入る。 */
   private arrow(
     g: Phaser.GameObjects.Graphics,
     from: { x: number; y: number },
@@ -800,27 +811,37 @@ export class GameScene extends Phaser.Scene {
     alpha: number,
   ): void {
     const l = this.layout;
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1) return;
+    const ends = arrowEndpoints(from, to, l.cell);
+    if (!ends) return;
+    const { tail, head } = ends;
+    g.lineStyle(Math.max(2, l.cell * 0.07), color, alpha);
+    g.lineBetween(tail.x, tail.y, head.x, head.y);
+    const dx = head.x - tail.x;
+    const dy = head.y - tail.y;
+    const len = Math.hypot(dx, dy) || 1;
     const ux = dx / len;
     const uy = dy / len;
-    const pad = l.cell * 0.42;
-    const x0 = from.x + ux * pad;
-    const y0 = from.y + uy * pad;
-    const x1 = to.x - ux * pad;
-    const y1 = to.y - uy * pad;
-    if (Math.hypot(x1 - x0, y1 - y0) < 4) return;
-    g.lineStyle(Math.max(2, l.cell * 0.07), color, alpha);
-    g.lineBetween(x0, y0, x1, y1);
     const hh = l.cell * 0.2;
     g.fillStyle(color, alpha);
     g.fillTriangle(
-      x1, y1,
-      x1 - ux * hh - uy * hh * 0.55, y1 - uy * hh + ux * hh * 0.55,
-      x1 - ux * hh + uy * hh * 0.55, y1 - uy * hh - ux * hh * 0.55,
+      head.x, head.y,
+      head.x - ux * hh - uy * hh * 0.55, head.y - uy * hh + ux * hh * 0.55,
+      head.x - ux * hh + uy * hh * 0.55, head.y - uy * hh - ux * hh * 0.55,
     );
+  }
+
+  /** 向きを示さない結び（先端を付けない）。因果の向きが決まらないときに使う。 */
+  private connector(
+    g: Phaser.GameObjects.Graphics,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    color: number,
+    alpha: number,
+  ): void {
+    const ends = arrowEndpoints(from, to, this.layout.cell);
+    if (!ends) return;
+    g.lineStyle(Math.max(2, this.layout.cell * 0.07), color, alpha);
+    g.lineBetween(ends.tail.x, ends.tail.y, ends.head.x, ends.head.y);
   }
 
   private cellX(index: number): number {

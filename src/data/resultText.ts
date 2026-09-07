@@ -1,4 +1,4 @@
-import type { ResolutionEvent } from '../game/types';
+import type { ResolutionEvent, SpecialInstance } from '../game/types';
 import { comboName } from './combos';
 
 /**
@@ -99,3 +99,41 @@ function plainChainNote(chainIndex: number): string | null {
 
 /** 旧名との互換のため残す（テストから使う）。 */
 export const chainNote = plainChainNote;
+
+/**
+ * COMBO で結ばれた特殊と、**因果の向き**。
+ *
+ * `Detonation.group` は決定論のため index 昇順に並べてあるだけで、
+ * 配列順に因果の意味は無い（それを向きとして使うと矢印が逆になる）。
+ * 向きは resolution が残した消去記録から取る。
+ *
+ *   起点   … 前の波でラインに巻きこまれて消えており、この波で起爆した側。
+ *            だから **この波の removed には入っていない**。
+ *   取り込まれた側 … 盤面に残っていたところへ効果が届いた側。
+ *            **この波の removed に入る**（起爆範囲に含まれて消える）。
+ *
+ * 起爆待ちどうしが結ばれた場合は両方が起点なので取り込まれた側が居ない。
+ * そのときは向きが定まらないので `directed: false` を返す
+ * （表示側は片方向の矢印を出さず、向きのない線で結ぶ）。
+ *
+ * **combo かどうかの判定はここでやり直さない。** 見るのは Detonation.effect だけ。
+ */
+export interface ComboLink {
+  /** 効果を届かせた側（矢印の始点）。 */
+  readonly from: readonly SpecialInstance[];
+  /** 効果が届いて取り込まれた側（矢印の先端）。 */
+  readonly to: readonly SpecialInstance[];
+  /** 片方向の矢印を出してよいか。false なら向きは示さない。 */
+  readonly directed: boolean;
+  /** 結ばれた特殊すべて（枠を描く対象）。 */
+  readonly all: readonly SpecialInstance[];
+}
+
+export function comboLinkOf(ev: ResolutionEvent): ComboLink | null {
+  const det = ev.detonations.find((d) => comboName(d.effect) !== null);
+  if (!det) return null;
+  const removed = new Set(ev.removed.map((r) => r.index));
+  const to = det.group.filter((g) => removed.has(g.index));
+  const from = det.group.filter((g) => !removed.has(g.index));
+  return { from, to, directed: from.length > 0 && to.length > 0, all: det.group };
+}
