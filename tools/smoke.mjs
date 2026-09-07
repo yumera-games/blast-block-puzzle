@@ -10,7 +10,7 @@
  *   ④ 実際にドラッグして配置できる（マウスとタッチの両方）
  *   ⑤ Stage 1〜12 を順に読み込める
  *   ⑥ debug 表示を ON / OFF できる
- *   ⑦ objective のラベルが省略（ellipsis）されずに全文出る
+ *   ⑦ objective が省略されず、ゲーム領域と縦にも重ならない（Stage 1〜12 x 4 幅）
  */
 import { existsSync } from 'fs';
 import { mkdirSync } from 'fs';
@@ -64,25 +64,81 @@ for (const [w, h] of SIZES) {
   if (m.gapBottom < 4) ng.push(`${w}x${h}: 操作ボタンの下に余白がない`);
   note.push(`  ${w}x${h}: canvas ${m.canvas.w}x${m.canvas.h} / 下の余白 ${m.gapBottom}px / stage ${m.state.stage}`);
 
-  // ⑦ objective ラベルが省略されていないか。
-  // .obj .lbl は nowrap + text-overflow: ellipsis なので、はみ出すと無言で「…」になる。
-  // 見た目では気づきにくいので scrollWidth <= clientWidth を実測する。
-  for (const id of [10, 11, 12]) {
+  // ⑦ objective の収まり。横（省略）と縦（ゲーム領域との重なり）の両方を見る。
+  //
+  //   横: .obj .lbl は nowrap + text-overflow: ellipsis なので、はみ出すと無言で「…」になる。
+  //   縦: canvas の寸法は #stage-wrap の実寸から決まるが、#stage-wrap の高さは
+  //       目的の本数とヒント行の折り返しで変わる。作り直さないと canvas がはみ出し、
+  //       overflow: visible + align-items: center なので objective 行の上へ重なる。
+  //       #stage-wrap は DOM 順で #hud より後ろなので、重なった canvas が上に描かれる。
+  let objChecked = 0;
+  const ngBefore = ng.length;
+  for (let id = 1; id <= 12; id++) {
     await page.evaluate((n) => window.__blast.goStage(n), id);
-    await page.waitForTimeout(120);
-    const labels = await page.evaluate(() =>
-      [...document.querySelectorAll('#objectives .obj .lbl')].map((el) => ({
-        text: el.textContent,
-        clientWidth: el.clientWidth,
-        scrollWidth: el.scrollWidth,
-      })),
-    );
-    for (const lb of labels) {
-      if (lb.scrollWidth > lb.clientWidth)
-        ng.push(`${w}x${h}: Stage ${id} の objective が省略されている「${lb.text}」 ${lb.scrollWidth} > ${lb.clientWidth}px`);
-      note.push(`  ${w}x${h}: Stage ${id} objective「${lb.text}」 scrollWidth ${lb.scrollWidth} <= clientWidth ${lb.clientWidth}`);
+    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      const ov = document.querySelector('#overlay');
+      if (ov.classList.contains('on')) ov.querySelector('button')?.click();
+    });
+    await page.waitForTimeout(150);
+
+    const f = await page.evaluate(() => {
+      const overlapY = (a, b) => Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+      const wrap = document.querySelector('#stage-wrap').getBoundingClientRect();
+      const canvas = document.querySelector('#game canvas').getBoundingClientRect();
+      const ctrl = document.getElementById('controls').getBoundingClientRect();
+      const rows = [...document.querySelectorAll('#objectives .obj')].map((el) => {
+        const lbl = el.querySelector('.lbl');
+        const r = el.getBoundingClientRect();
+        return {
+          text: lbl.textContent,
+          lblClientWidth: lbl.clientWidth,
+          lblScrollWidth: lbl.scrollWidth,
+          clientHeight: el.clientHeight,
+          scrollHeight: el.scrollHeight,
+          bottom: r.bottom,
+          overlapWrap: +overlapY(r, wrap).toFixed(2),
+          overlapCanvas: +overlapY(r, canvas).toFixed(2),
+        };
+      });
+      return {
+        rows,
+        wrapTop: wrap.top,
+        canvasW: Math.round(canvas.width),
+        canvasInWrap: canvas.top >= wrap.top - 0.5 && canvas.bottom <= wrap.bottom + 0.5,
+        hintOverlapCanvas: +overlapY(document.getElementById('hint').getBoundingClientRect(), canvas).toFixed(2),
+        gapBottom: Math.round(window.innerHeight - ctrl.bottom),
+        overflowY: Math.round(document.documentElement.scrollHeight - window.innerHeight),
+        overflowX: Math.round(document.documentElement.scrollWidth - window.innerWidth),
+      };
+    });
+
+    for (const r of f.rows) {
+      objChecked++;
+      if (r.lblScrollWidth > r.lblClientWidth)
+        ng.push(`${w}x${h}: Stage ${id} の objective が横に省略「${r.text}」 ${r.lblScrollWidth} > ${r.lblClientWidth}px`);
+      if (r.scrollHeight > r.clientHeight)
+        ng.push(`${w}x${h}: Stage ${id} の objective が縦にクリップ「${r.text}」 ${r.scrollHeight} > ${r.clientHeight}px`);
+      if (r.bottom > f.wrapTop + 0.5)
+        ng.push(`${w}x${h}: Stage ${id} の objective 下端がゲーム領域上端を越えた ${r.bottom.toFixed(2)} > ${f.wrapTop.toFixed(2)}`);
+      if (r.overlapWrap > 0 || r.overlapCanvas > 0)
+        ng.push(`${w}x${h}: Stage ${id} の objective がゲーム領域と縦に ${Math.max(r.overlapWrap, r.overlapCanvas)}px 重なる「${r.text}」`);
     }
+    if (!f.canvasInWrap) ng.push(`${w}x${h}: Stage ${id} の canvas が #stage-wrap からはみ出している`);
+    if (f.hintOverlapCanvas > 0) ng.push(`${w}x${h}: Stage ${id} のヒント行が canvas と ${f.hintOverlapCanvas}px 重なる`);
+    if (f.canvasW < 180) ng.push(`${w}x${h}: Stage ${id} の盤面が ${f.canvasW}px しかない`);
+    if (f.gapBottom < 4) ng.push(`${w}x${h}: Stage ${id} で操作ボタンの下に余白がない`);
+    if (f.overflowY > 2) ng.push(`${w}x${h}: Stage ${id} で縦に ${f.overflowY}px はみ出す`);
+    if (f.overflowX > 2) ng.push(`${w}x${h}: Stage ${id} で横に ${f.overflowX}px はみ出す`);
+    if ([10, 11, 12].includes(id))
+      for (const r of f.rows)
+        note.push(`  ${w}x${h}: Stage ${id} objective「${r.text}」 scrollWidth ${r.lblScrollWidth} <= clientWidth ${r.lblClientWidth} / ゲーム領域との縦交差 ${r.overlapCanvas}px`);
   }
+  note.push(
+    ng.length === ngBefore
+      ? `  ${w}x${h}: Stage 1〜12 の objective ${objChecked} 行すべてが省略なし・ゲーム領域と縦交差 0`
+      : `  ${w}x${h}: objective ${objChecked} 行を検査し、${ng.length - ngBefore} 件の問題を検出`,
+  );
 
   await ctx.close();
 }

@@ -240,6 +240,14 @@ npm run smoke   # 320/375/393/430 px での表示 + 実ドラッグでの Stage 
 npm run stats   # 発生率・combo 率・生存手数の測定（前後比較に使う）
 ```
 
+`npm run smoke` は、objective 行が**横に省略されない**（`scrollWidth <= clientWidth`）ことと、
+**ゲーム領域と縦に重ならない**（交差長 0）ことを Stage 1〜12 x 4 幅で実測します。
+canvas の寸法は `#stage-wrap` の実寸から決まり、その高さは目的の本数と
+ヒント行の折り返しで変わります。作り直さないと canvas が `#stage-wrap` をはみ出し、
+`overflow: visible` + `align-items: center` なので objective 行の上へ重なります
+（DOM 順で canvas のほうが後ろなので、上に描かれて文字が読めなくなる）。
+`main.ts` の `fitToAvailableSpace()` が表示領域の変化を見て作り直します。
+
 `tests/stages.test.ts` は Stage 1〜12 の**想定解**を持っていて、
 目的が実際に達成できることを毎回確かめます。ここが落ちたら、
 ステージデータかコアルールのどちらかが壊れています。

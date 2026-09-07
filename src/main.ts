@@ -37,6 +37,10 @@ const hooks: SceneHooks = {
     scene.setHint(hint);
     tutorial.renderHintText(hint);
     hud.update(state, chainNow, shown);
+    // HUD とヒント行の高さは、目的の本数やヒント文の折り返しで変わる。
+    // canvas の寸法はそのとき残っていた高さから決めているので、作り直さないと
+    // canvas が #stage-wrap をはみ出し、objective 行の上へ重なってしまう。
+    fitToAvailableSpace();
     debug.render({ state, lastResult: state.lastResult, chainNow, fps: Math.round(game.loop.actualFps) });
   },
   onPreview(key, preview) {
@@ -88,11 +92,15 @@ const game = new Phaser.Game({
 
 /* ------------------------------------------------------------------ 画面サイズ */
 
+/** 直前に layout を決めたときの表示領域。変わっていなければ計算し直さない。 */
+let lastAvail = { w: -1, h: -1 };
+
 function resize(): void {
   const wrap = $('stage-wrap');
   const dpr = Math.min(3, window.devicePixelRatio || 1);
   const availW = wrap.clientWidth || window.innerWidth;
   const availH = wrap.clientHeight || window.innerHeight * 0.6;
+  lastAvail = { w: availW, h: availH };
   layout = computeLayout(availW, availH, dpr);
 
   game.scale.setZoom(1 / dpr);
@@ -100,6 +108,24 @@ function resize(): void {
   game.canvas.style.width = `${layout.cssWidth}px`;
   game.canvas.style.height = `${layout.cssHeight}px`;
   scene.applyLayout(layout);
+}
+
+/**
+ * 表示領域が変わっていたら layout を作り直す。
+ *
+ * **canvas の大きさは #stage-wrap の実寸から決まる。** ところが #stage-wrap の高さは
+ * HUD（目的の本数）とヒント行（折り返し行数）で変わるため、ステージを切り替えたり
+ * ヒントが出入りしたりすると、前の高さのまま作った canvas がはみ出す。
+ * #stage-wrap は overflow: visible・align-items: center なので、はみ出しは上下へ均等に出て、
+ * DOM 順で後ろにある canvas が objective 行の上へ描かれてしまう。
+ *
+ * #stage-wrap の高さは flex の残り幅で決まり canvas の大きさには依存しないので、
+ * ここから resize() を呼んでも再帰しない（次の呼び出しでは寸法が一致して何もしない）。
+ */
+function fitToAvailableSpace(): void {
+  const wrap = $('stage-wrap');
+  if (wrap.clientWidth === lastAvail.w && wrap.clientHeight === lastAvail.h) return;
+  resize();
 }
 
 window.addEventListener('resize', resize);
