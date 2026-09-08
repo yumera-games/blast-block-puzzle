@@ -180,4 +180,6 @@ CHAIN 表示 / COMBO 表示 / 予告表示 / トレイ / 操作ボタン / モ�
 
 ## 9. 関連文書
 
+- [Phase 2C 人間評価結果](./evaluations/PHASE2C_HUMAN_EVALUATION.md) —
+  「実装完了・教材効果未達」でクローズ。UI 監査への申し送りを含む。
 - [README](../README.md) — 実装内容と Phase ごとの変更記録。

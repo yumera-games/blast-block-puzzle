@@ -28,6 +28,8 @@
 ## 文書
 
 - 方針の全文：[docs/DEVELOPMENT_POLICY.md](docs/DEVELOPMENT_POLICY.md)
+- Phase 2C 人間評価結果（実装完了・教材効果未達）：
+  [docs/evaluations/PHASE2C_HUMAN_EVALUATION.md](docs/evaluations/PHASE2C_HUMAN_EVALUATION.md)
 - 実装と Phase ごとの記録：[README.md](README.md)
 
 方針を変えるときは、実装より先に `docs/DEVELOPMENT_POLICY.md` を更新して承認を得ること。
