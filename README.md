@@ -23,6 +23,10 @@ Phase 1 の実物レビューを受けて、Phase 2A でコアルールの数値
 - **[Phase 2C 人間評価結果](docs/evaluations/PHASE2C_HUMAN_EVALUATION.md)** —
   「実装完了・教材効果未達」でクローズ。何が達成でき、何が未達で、
   何が未検証のままかと、UI 監査への申し送り。
+- **[メインプレイ画面 UI 監査](docs/audits/MAIN_PLAY_UI_AUDIT.md)**（第 1 段階） —
+  問題・原因・優先度・改善方針。実測値と証拠画像つき。
+- **[メインプレイ画面 デザイン方向案](docs/design/MAIN_PLAY_DESIGN_DIRECTIONS.md)**（第 2 段階 2A） —
+  デザイン方向 3 案と共通システム案の比較資料。**採用は未決定。アプリへは未実装。**
 
 ## 動かす
 
