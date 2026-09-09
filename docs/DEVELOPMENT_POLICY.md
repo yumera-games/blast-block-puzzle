@@ -244,6 +244,8 @@ CHAIN 表示 / COMBO 表示 / 予告表示 / トレイ / 操作ボタン / モ�
 ### 9-5. 関連文書
 
 - [魔法のおかしの国：スイーツアルケミー 構想試作](./design/CANDY_KINGDOM_PUZZLE_CONCEPT.md) — 手順 1 の成果物
+  （構想とルールは有効。第 5 ラウンドの画像は「世界観の視覚統合は未達」と判定）
+- [世界観統合ビジュアル試作](./design/CANDY_KINGDOM_VISUAL_INTEGRATION.md) — 手順 1 の視覚統合のやり直し
 
 ## 10. 関連文書
 
@@ -252,5 +254,7 @@ CHAIN 表示 / COMBO 表示 / 予告表示 / トレイ / 操作ボタン / モ�
 - [メインプレイ画面 デザイン方向案](./design/MAIN_PLAY_DESIGN_DIRECTIONS.md) —
   第 2 段階 2A。A2-HW-R と N1 の定義・実測。
 - [魔法のおかしの国：スイーツアルケミー 構想試作](./design/CANDY_KINGDOM_PUZZLE_CONCEPT.md) —
-  パズル版の手順 1。
+  パズル版の手順 1（構想・ルール）。
+- [世界観統合ビジュアル試作](./design/CANDY_KINGDOM_VISUAL_INTEGRATION.md) —
+  パズル版の手順 1（視覚統合）。
 - [README](../README.md) — 実装内容と Phase ごとの変更記録。
