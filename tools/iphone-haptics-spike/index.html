@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>iPhone 触覚スパイク（本番機能ではない）</title>
+<!-- ホーム画面追加の検証用。スパイク専用であり、本番アプリには追加しない。 -->
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Haptics Spike">
+<link rel="stylesheet" href="./spike.css">
+</head>
+<body>
+<header class="hd">
+  <p class="warn">これは技術スパイクです。<b>本番機能ではありません。</b>採用も確定もしていません。</p>
+  <h1>iPhone 触覚スパイク</h1>
+  <p class="sub">Safari 18 以降の <code>&lt;input type="checkbox" switch&gt;</code> による触覚が、
+  ゲームのイベント相当のタイミングで得られるかを調べます。</p>
+</header>
+
+<section class="env" aria-labelledby="env-h">
+  <h2 id="env-h">環境</h2>
+  <dl id="envList"></dl>
+  <p class="note" id="switchSupport"></p>
+</section>
+
+<section class="base" aria-labelledby="base-h">
+  <h2 id="base-h">Test A：基準（あなたが直接操作する）</h2>
+  <p class="desc">下のスイッチを<b>指で直接</b>切り替えてください。Safari 本来の触覚が出るかを確かめます。</p>
+  <label class="swrow">
+    <input type="checkbox" switch id="baseSwitch">
+    <span>基準スイッチ（直接操作）</span>
+  </label>
+  <div class="ans" data-test="A"></div>
+</section>
+
+<main id="tests"></main>
+
+<section class="out" aria-labelledby="out-h">
+  <h2 id="out-h">結果</h2>
+  <p class="desc">下のボタンで結果を JSON としてコピーできます。<b>外部へは一切送信しません。</b></p>
+  <div class="btnrow">
+    <button type="button" id="copyBtn" class="btn primary">COPY RESULTS（JSON をコピー）</button>
+    <button type="button" id="resetBtn" class="btn">記録をリセット</button>
+  </div>
+  <p class="note" id="copyState" role="status" aria-live="polite"></p>
+  <textarea id="jsonOut" readonly rows="12" spellcheck="false"
+    aria-label="結果 JSON（選択してコピーもできます）"></textarea>
+</section>
+
+<footer class="ft">
+  <p><b>コード上の「実行された」と、実際に「触覚を感じた」は別物です。</b>
+  触覚の有無は、あなたの実機回答だけで確定します。自動判定はしていません。</p>
+  <p id="storeNote"></p>
+  <p class="ver" id="verNote"></p>
+</footer>
+
+<script src="./spike.js"></script>
+</body>
+</html>

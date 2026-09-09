@@ -1,0 +1,11 @@
+{
+  "name": "iPhone Haptics Spike (not a product feature)",
+  "short_name": "Haptics Spike",
+  "description": "Technical spike only. Checks whether Safari's switch-control haptic feedback can be reached from game-like timings. Not part of the BLAST BLOCK product build.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14121f",
+  "theme_color": "#14121f"
+}
