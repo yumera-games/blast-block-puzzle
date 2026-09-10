@@ -2034,6 +2034,7 @@ half=58 では「四隅の内側 0.78」の採取点がタイル半幅の 17% �
 
 ## 11. 関連文書
 
+- **[SEPTERA 世界観設計書](SEPTERA_WORLD_BIBLE.md)** — **本文書に記録した Small ／ Regular 素材 14 点は、そちらで正式な世界観上の意味を与えられている。測定規則（11-5）もそちらへ引き継がれている。**
 - [開発方針（正式決定）](../DEVELOPMENT_POLICY.md) — 第 9 節にパズル版の位置づけと進行順
 - [魔法のおかしの国：スイーツアルケミー 構想試作](CANDY_KINGDOM_PUZZLE_CONCEPT.md) — 構想・ルール（有効・保持）
 - [メインプレイ画面 デザイン方向案](MAIN_PLAY_DESIGN_DIRECTIONS.md) — A2-HW-R と N1 の色トークンと実測
