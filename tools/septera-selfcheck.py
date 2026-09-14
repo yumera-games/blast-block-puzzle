@@ -8,6 +8,11 @@ SEPTERA 人物ラフ 自己検査ツール（Python 標準ライブラリのみ 
 PNG 検査・ZIP 検査とも標準ライブラリだけで完結します。
 unzip などの外部コマンドは使用しません。ZIP はファイルシステムへ展開しません。
 
+条件 B の背景の固定安全帯は 左 x0〜99 / 右 x924〜1023 です。
+人物が入れる範囲は x100〜x923、最大 824px となり、条件 D の 640〜780px と両立します。
+「人物外接の外に非背景 0 画素」は、全非背景画素から外接を求める実装では
+定義上必ず 0 になるため、情報表示のみとし、B の合否には含めません。
+
 条件 A・B・C・E は登録済みの人物ラフに共通の条件です。
 条件 D（幅）・F（荷の大きさ）・H（平均彩度）は**渡りのオーレン v1 専用の合否条件**で、
 ほかの登録済み人物に対しては FAIL になります。それが正しい挙動です。
@@ -253,11 +258,11 @@ def main():
             for x in range(x0, x0+40):
                 if is_bg(x, y):
                     corners += 1
-    left = sum(1 for y in range(h) for x in range(0, 200) if not is_bg(x, y))
-    right = sum(1 for y in range(h) for x in range(824, 1024) if not is_bg(x, y))
+    left = sum(1 for y in range(h) for x in range(0, 100) if not is_bg(x, y))
+    right = sum(1 for y in range(h) for x in range(924, 1024) if not is_bg(x, y))
     print('   四隅6,400の一致 : %d' % corners)
-    print('   左端 x0〜199    : 非背景 %d 画素' % left)
-    print('   右端 x824〜1023 : 非背景 %d 画素' % right)
+    print('   左端 x0〜99     : 非背景 %d 画素' % left)
+    print('   右端 x924〜1023 : 非背景 %d 画素' % right)
 
     X0, X1, Y0, Y1, area = w, -1, h, -1, 0
     for y in range(h):
@@ -279,9 +284,9 @@ def main():
             for x in range(w):
                 if not is_bg(x, y):
                     outside += 1
-    print('   人物外接外      : 非背景 %d 画素' % outside)
-    P('B 背景', corners == 6400 and left == 0 and right == 0 and outside == 0,
-      '四隅6400 / 左右端0 / 外接外0')
+    print('   人物外接外      : 非背景 %d 画素（外接定義による情報表示）' % outside)
+    P('B 背景', corners == 6400 and left == 0 and right == 0,
+      '四隅6400 / 左端 x0〜99 が 0 / 右端 x924〜1023 が 0')
 
     print('\n5. 人物形状')
     bw, bh = X1-X0+1, Y1-Y0+1
