@@ -1059,7 +1059,7 @@
 - [メインプレイ画面 UI 監査](../audits/MAIN_PLAY_UI_AUDIT.md)
 - [Phase 2C 人間評価結果](../evaluations/PHASE2C_HUMAN_EVALUATION.md)
 - 登録済み素材：[`assets/approved-small/`](assets/approved-small/)（Small 8 点）／[`assets/approved-regular/`](assets/approved-regular/)（Regular 8 点）
-- **登録済みラフ**：[`assets/septera-character-roughs/`](assets/septera-character-roughs/)（人物 5 枚＋シイ単体 1 枚）／[`assets/septera-title-roughs/`](assets/septera-title-roughs/)（表紙 A 案 v5、アイコン A-1 v1）— **いずれもラフであり本番採用素材ではない。**実測値と受け入れ記録は 12-1 〜 12-11
+- **登録済みラフ**：[`assets/septera-character-roughs/`](assets/septera-character-roughs/)（**人物 10 人・11 枚。**立ち姿と後ろ姿 10 枚＋シイ単体ビジュアル 1 枚。ネイだけが正面と後ろ姿の 2 枚を持つ。ほかにサラの旧版 v4 を経緯として保管）／[`assets/septera-title-roughs/`](assets/septera-title-roughs/)（表紙 A 案 v5、アイコン A-1 v1）— **いずれもラフであり本番採用素材ではない。****登録原本は合計 14 点**（人物ラフ 11 点＋サラ旧版 v4＋表紙 A 案 v5＋アイコン A-1 v1）。実測値と受け入れ記録は 12-1 〜 12-11
 
 ---
 
