@@ -639,7 +639,10 @@ def main():
                 print('   → FAIL の項目があるため、提出不可です。')
             print('     提出せず、数値をそのまま報告してください。')
         print('=' * 64)
-        return
+        # 終了コード：ZIP 検査と A・B・C・E・S-1〜S-8 がすべて PASS なら 0、それ以外は 1。
+        # D・F・H（オーレン専用のため判定対象外）と
+        # T・U・V（人による申告待ち）は終了コードへ影響させない。
+        return 0 if ok else 1
 
     print('\n7. 条件G（肩紐の角度）／ 10. 顔')
     print('   ★ この 2 項目は自動測定できません。')
@@ -669,5 +672,9 @@ def main():
             print('   → FAIL の項目があるため、提出不可です。')
         print('     提出せず、数値をそのまま報告してください。')
     print('=' * 64)
+    # 終了コード：ZIP 検査と A・B・C・D・E・F-1・F-2・F-3・H がすべて PASS なら 0、それ以外は 1。
+    # G・I（人による申告待ち）は終了コードへ影響させない。
+    return 0 if (zstatus == 'PASS' and all(res.values())) else 1
 
-main()
+
+sys.exit(main())
