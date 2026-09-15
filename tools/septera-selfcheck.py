@@ -3,7 +3,12 @@
 """
 SEPTERA 人物ラフ 自己検査ツール（Python 標準ライブラリのみ / 外部コマンド不要）
 
-使い方:  python3 septera-selfcheck.py <PNGファイル> --zip <ZIPファイル>
+使い方:  python3 septera-selfcheck.py <PNGファイル> --zip <ZIPファイル> [--target oren|seran]
+
+--target を省略すると oren として動作します（従来どおり）。
+--target seran では、オーレン専用の条件 D・F・H を判定対象外とし、
+セラン専用の条件 S-1〜S-8 を自動判定します。
+--target はどの位置に置いても構いません。
 
 PNG 検査・ZIP 検査とも標準ライブラリだけで完結します。
 unzip などの外部コマンドは使用しません。ZIP はファイルシステムへ展開しません。
@@ -20,6 +25,7 @@ unzip などの外部コマンドは使用しません。ZIP はファイルシ�
 条件 G（肩紐の角度）と I（顔）は自動測定できません。理由は実行時に表示します。
 """
 import sys, os, zlib, struct, hashlib, statistics, zipfile
+from fractions import Fraction
 
 BG = (128, 128, 128)          # #808080
 W_EXP, H_EXP = 1024, 2048
@@ -204,14 +210,148 @@ def zip_check(zip_path, png_path):
     return ('PASS' if ok else 'FAIL'), L
 
 
+# ---------- セラン専用の測定 ----------
+def pct90(sorted_vals):
+    """90%点。設計書の測定と同じ方法（昇順に並べ、index = floor(n*0.90)）。"""
+    return sorted_vals[int(len(sorted_vals)*0.90)]
+
+
+def seran_metrics(px, w, h):
+    """背景 #808080 でない画素を対象に、S-1〜S-8 の素材を集める。"""
+    V = [None]*(w*h)          # 非背景画素の明度（背景は None）
+    S3 = [0]*(w*h)            # 非背景画素の R+G+B（整数）
+    lowsat = bytearray(w*h)   # 彩度 0.12 以下の非背景画素
+    neutral = bytearray(w*h)  # R=G=B ちょうどの非背景画素
+    sats = []
+    vals = []
+    n = 0
+    # 平均は浮動小数を足し込むと境界ちょうどで誤判定する（0.075 が 0.07500000000000896 になる）。
+    # 判定用の平均は整数で貯めて有理数で求める。
+    sat_num = {}      # mx -> Σ(mx-mn)
+    v_total = 0       # Σ(R+G+B)
+    for y in range(h):
+        base = y*w
+        for x in range(w):
+            i = (base+x)*4
+            R, G, B = px[i], px[i+1], px[i+2]
+            if R == 128 and G == 128 and B == 128:
+                continue
+            n += 1
+            v = (R+G+B)/3.0
+            mx = R if R >= G and R >= B else (G if G >= B else B)
+            mn = R if R <= G and R <= B else (G if G <= B else B)
+            sv = 0.0 if mx == 0 else (mx-mn)/mx
+            V[base+x] = v
+            S3[base+x] = R+G+B
+            vals.append(v)
+            sats.append(sv)
+            if mx:
+                sat_num[mx] = sat_num.get(mx, 0) + (mx-mn)
+            v_total += R+G+B
+            if sv <= 0.12:
+                lowsat[base+x] = 1
+            if R == G and G == B:
+                neutral[base+x] = 1
+    # S-5 / S-6：右隣・下隣の組を 1 回ずつ。どちらも非背景であること。
+    inner, edge = [], []
+    inner_dsum = edge_dsum = 0     # Σ|Δ(R+G+B)|。明度差 = これ / 3
+    for y in range(h):
+        base = y*w
+        for x in range(w):
+            k = base+x
+            if V[k] is None:
+                continue
+            lo = lowsat[k]
+            for dx, dy in ((1, 0), (0, 1)):
+                nx, ny = x+dx, y+dy
+                if nx >= w or ny >= h:
+                    continue
+                q = ny*w+nx
+                if V[q] is None:          # 背景との境界は集計しない
+                    continue
+                d = abs(V[q]-V[k])
+                ds = abs(S3[q]-S3[k])
+                lo2 = lowsat[q]
+                if lo and lo2:
+                    inner.append(d); inner_dsum += ds
+                elif lo != lo2:
+                    edge.append(d); edge_dsum += ds
+    # S-4：完全中性画素の 8 連結（肌の継ぎ目と同じ近傍定義）
+    lab = bytearray(w*h)
+    comps = []
+    for k in range(w*h):
+        if not neutral[k] or lab[k]:
+            continue
+        st = [k]; lab[k] = 1
+        cnt = 0; mnx = mxx = k % w; mny = mxy = k // w
+        while st:
+            p0 = st.pop(); cnt += 1
+            pxx, pyy = p0 % w, p0 // w
+            if pxx < mnx: mnx = pxx
+            if pxx > mxx: mxx = pxx
+            if pyy < mny: mny = pyy
+            if pyy > mxy: mxy = pyy
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    nx, ny = pxx+dx, pyy+dy
+                    if 0 <= nx < w and 0 <= ny < h:
+                        q = ny*w+nx
+                        if neutral[q] and not lab[q]:
+                            lab[q] = 1; st.append(q)
+        comps.append((cnt, mnx, mxx, mny, mxy))
+    comps.sort(key=lambda c: -c[0])
+    sats.sort(); vals.sort()
+    def stat(arr):
+        if not arr:
+            return None
+        a = sorted(arr)
+        return {'n': len(a), 'mean': sum(a)/len(a),
+                'med': statistics.median(a), 'p90': pct90(a)}
+    sat_mean_exact = sum((Fraction(num, mx) for mx, num in sat_num.items()),
+                         Fraction(0)) / n if n else Fraction(0)
+    return {'n': n,
+            'sat_mean_exact': sat_mean_exact,
+            'v_mean_exact': Fraction(v_total, 3*n) if n else Fraction(0),
+            'inner_mean_exact': Fraction(inner_dsum, 3*len(inner)) if inner else None,
+            'edge_mean_exact': Fraction(edge_dsum, 3*len(edge)) if edge else None,
+            'sat_mean': float(sat_mean_exact) if n else 0.0,
+            'sat_med': statistics.median(sats) if n else 0.0,
+            'v_mean': float(Fraction(v_total, 3*n)) if n else 0.0,
+            'v_med': statistics.median(vals) if n else 0.0,
+            'neu': sum(neutral),
+            'comps': comps,
+            'inner': stat(inner), 'edge': stat(edge)}
+
+
 # ---------- 本体 ----------
 def main():
-    if len(sys.argv) < 2:
-        raise SystemExit(__doc__)
-    png = sys.argv[1]
+    argv = sys.argv[1:]
+    target = 'oren'
     zipf = None
-    if '--zip' in sys.argv:
-        zipf = sys.argv[sys.argv.index('--zip') + 1]
+    rest = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == '--target':
+            if i+1 >= len(argv):
+                raise SystemExit('--target の後に oren か seran を書いてください')
+            target = argv[i+1]
+            if target not in ('oren', 'seran'):
+                raise SystemExit('--target は oren か seran です: %s' % target)
+            i += 2
+        elif a == '--zip':
+            if i+1 >= len(argv):
+                raise SystemExit('--zip の後に ZIP ファイルを書いてください')
+            zipf = argv[i+1]
+            i += 2
+        else:
+            rest.append(a)
+            i += 1
+    if not rest:
+        raise SystemExit(__doc__)
+    png = rest[0]
 
     info, px, w, h = read_png(png)
     rgb, is_bg, val = make_helpers(px, w)
@@ -303,7 +443,10 @@ def main():
     print('   最大幅の行位置  : y=%d（上端から %d px ＝ %.2f%%）'
           % (mrow, mrow-Y0, (mrow-Y0)/bh*100))
     P('C 高さ', 1434 <= bh <= 1474, '1,434〜1,474 に対し %d' % bh)
-    P('D 幅',  640 <= bw <= 780,   '640〜780 に対し %d（登録済み最大 トゥーラ 603）' % bw)
+    if target == 'oren':
+        P('D 幅',  640 <= bw <= 780,   '640〜780 に対し %d（登録済み最大 トゥーラ 603）' % bw)
+    else:
+        print('  [----] D 幅  オーレン専用のためセランでは判定対象外（実測 %d）' % bw)
 
     print('\n6. 条件F（荷の大きさ）')
     def band(lo, hi):
@@ -316,9 +459,13 @@ def main():
     print('   上側の帯 15〜35%% : y%d〜%d   W1 = %.1f' % (a0, a1, W1))
     print('   下側の帯 75〜95%% : y%d〜%d   W2 = %.1f' % (b0, b1, W2))
     print('   W1 / W2         : %.4f' % ratio)
-    P('F-1 荷の絶対幅', W1 >= 620, 'W1 が 620 以上に対し %.1f（登録済み最大 トゥーラ 564）' % W1)
-    P('F-2 上が広い',   ratio >= 1.60, 'W1/W2 が 1.60 以上に対し %.4f' % ratio)
-    P('F-3 脚の太さ',   W2 >= 260, 'W2 が 260 以上に対し %.1f（細い脚で比を稼がないため）' % W2)
+    if target == 'oren':
+        P('F-1 荷の絶対幅', W1 >= 620, 'W1 が 620 以上に対し %.1f（登録済み最大 トゥーラ 564）' % W1)
+        P('F-2 上が広い',   ratio >= 1.60, 'W1/W2 が 1.60 以上に対し %.4f' % ratio)
+        P('F-3 脚の太さ',   W2 >= 260, 'W2 が 260 以上に対し %.1f（細い脚で比を稼がないため）' % W2)
+    else:
+        print('  [----] F 荷の大きさ  オーレン専用のためセランでは判定対象外')
+        print('         （実測 W1 %.1f ／ W2 %.1f ／ W1/W2 %.4f）' % (W1, W2, ratio))
 
     print('\n8. 条件H（平均彩度）')
     s, n = 0.0, 0
@@ -333,7 +480,12 @@ def main():
             n += 1
     sat = s/n if n else 0
     print('   平均彩度        : %.6f' % sat)
-    P('H 平均彩度', 0.18 <= sat <= 0.30, '0.18〜0.30 に対し %.6f' % sat)
+    if target == 'oren':
+        P('H 平均彩度', 0.18 <= sat <= 0.30, '0.18〜0.30 に対し %.6f' % sat)
+    else:
+        print('  [----] H 平均彩度  オーレン専用のためセランでは判定対象外（実測 %.6f）' % sat)
+        print('         ※ この値は人物外接の内側のみを対象とします。')
+        print('           セランの S-1 は画像全体の非背景画素を対象とし、別の値になります。')
 
     print('\n9. 条件E（肌の継ぎ目・8連結）')
     mark = bytearray(w*h)
@@ -374,6 +526,113 @@ def main():
     print('   最長の縦の広がり: %d' % longest)
     P('E 肌の継ぎ目', len(longs) <= 14 and longest <= 110,
       '14本以下・最長110以下 に対し %d本 / %d' % (len(longs), longest))
+
+    if target == 'seran':
+        M = seran_metrics(px, w, h)
+        print('\n12. セラン専用条件（対象＝背景 #808080 でない画素）')
+        print('   非背景画素数    : %d' % M['n'])
+        print('   S-1 平均彩度    : %.9f' % M['sat_mean'])
+        P('S-1 平均彩度', Fraction(45,1000) <= M['sat_mean_exact'] <= Fraction(75,1000),
+          '0.045〜0.075 に対し %.9f' % M['sat_mean'])
+        print('   S-2 彩度中央値  : %.9f' % M['sat_med'])
+        P('S-2 彩度中央値', 0.030 <= M['sat_med'] <= 0.075,
+          '0.030〜0.075 に対し %.9f' % M['sat_med'])
+        ratio_neu = M['neu']/M['n'] if M['n'] else 0.0
+        print('   S-3 R=G=B の画素: %d ／ 割合 %.9f' % (M['neu'], ratio_neu))
+        P('S-3 完全中性の割合', ratio_neu <= 0.03,
+          '3%% 以下に対し %.9f（%d 画素）' % (ratio_neu, M['neu']))
+        comps = M['comps']
+        top = comps[0][0] if comps else 0
+        print('   S-4 完全中性グレーの 8 連結')
+        print('       成分数        : %d' % len(comps))
+        if comps:
+            c = comps[0]
+            print('       最大成分      : %d 画素  外接 x%d〜%d / y%d〜%d'
+                  % (c[0], c[1], c[2], c[3], c[4]))
+            print('       上位 10 成分  :')
+            for c in comps[:10]:
+                print('         %6d 画素  外接 x%d〜%d / y%d〜%d'
+                      % (c[0], c[1], c[2], c[3], c[4]))
+        else:
+            print('       最大成分      : なし')
+        P('S-4 最大中性成分', top <= 200, '200 画素以下に対し %d' % top)
+        inn = M['inner']
+        if inn:
+            print('   S-5 低彩度画素どうしの隣接明度差（右隣・下隣、彩度 0.12 以下）')
+            print('       組数 %d   平均 %.9f   中央値 %.9f   90%%点 %.9f'
+                  % (inn['n'], float(M['inner_mean_exact']), inn['med'], inn['p90']))
+            P('S-5 低彩度内部', M['inner_mean_exact'] >= Fraction(9,2),
+              '平均 4.5 以上に対し %.9f' % inn['mean'])
+        else:
+            print('   S-5 低彩度画素どうしの組が 0 件です')
+            P('S-5 低彩度内部', False, '対象の組がありません')
+        edg = M['edge']
+        if edg:
+            print('   S-6 低彩度領域の縁（片方だけが彩度 0.12 以下。背景との境界は除く）')
+            print('       組数 %d   平均 %.9f   中央値 %.9f   90%%点 %.9f'
+                  % (edg['n'], float(M['edge_mean_exact']), edg['med'], edg['p90']))
+            P('S-6 低彩度の縁', M['edge_mean_exact'] <= Fraction(12),
+              '平均 12 以下に対し %.9f' % edg['mean'])
+        else:
+            print('   S-6 低彩度領域の縁の組が 0 件です')
+            P('S-6 低彩度の縁', False, '対象の組がありません')
+        print('   S-7 明度の平均  : %.9f' % M['v_mean'])
+        P('S-7 明度平均', Fraction(85) <= M['v_mean_exact'] <= Fraction(105),
+          '85〜105 に対し %.9f' % M['v_mean'])
+        print('   S-8 明度中央値  : %.9f' % M['v_med'])
+        P('S-8 明度中央値', 85 <= M['v_med'] <= 110,
+          '85〜110 に対し %.9f' % M['v_med'])
+
+    if target == 'seran':
+        print('\n13. セランで人が確認する項目（自動測定できません）')
+        print('   T 記録筒 — 申告が必要')
+        print('     ・保持帯の方向')
+        print('     ・垂直線からの角度と測定端点')
+        print('     ・水平幅の中央値')
+        print('     ・可視連続長')
+        print('     ・肩上端部の相対位置')
+        print('     ・正面から見える筒本体が 0 画素であること')
+        print('     ・金属端部、刻み線、革帯、留め具')
+        print('     ・ネイ正面 v2 と同じ道具に見えること')
+        print('   U 顔・人物設定 — 申告が必要')
+        print('     ・ネイと同年代に見える')
+        print('     ・目を確定させていない')
+        print('     ・虹彩・瞳孔・まつ毛・眉・毛並みとしての髭がない')
+        print('     ・穏やかで憎しみのない表情')
+        print('     ・「美しい／哀しい」と矛盾しない')
+        print('     ・軍勢、武器、追加装備、未確定設定を加えていない')
+        print('   V 目視品質 — 申告が必要')
+        print('     ・ネイと並べて、同じ人物像から色だけが失われたと読める')
+        print('     ・衣装、肌、髪、革、金属、記録筒の素材差を明暗と質感で判別できる')
+        print('     ・線、顔、衣の折り目、留め具が消えていない')
+        print('     ・輪郭が背景へ溶けていない')
+        print('     ・一律の中性グレー塗りに見えない')
+        print('\n11. 最終判定（セラン）')
+        print('   %s : %s' % ('ZIP 検査'.ljust(18), zstatus))
+        keys = ('A 形式', 'B 背景', 'C 高さ', 'E 肌の継ぎ目',
+                'S-1 平均彩度', 'S-2 彩度中央値', 'S-3 完全中性の割合',
+                'S-4 最大中性成分', 'S-5 低彩度内部', 'S-6 低彩度の縁',
+                'S-7 明度平均', 'S-8 明度中央値')
+        for k in keys:
+            print('   %s : %s' % (k.ljust(18), 'PASS' if res.get(k) else 'FAIL'))
+        for k in ('D 幅', 'F 荷の大きさ', 'H 平均彩度'):
+            print('   %s : 判定対象外（オーレン専用）' % k.ljust(18))
+        for k in ('T 記録筒', 'U 顔・人物設定', 'V 目視品質'):
+            print('   %s : 申告が必要（自動測定不可）' % k.ljust(18))
+        print()
+        ok = zstatus == 'PASS' and all(res.get(k) for k in keys)
+        if ok:
+            print('   → 機械検査は提出可。')
+            print('     T（記録筒）・U（顔・人物設定）・V（目視品質）を')
+            print('     申告に必ず含めてください。')
+        else:
+            if zstatus != 'PASS':
+                print('   → ZIP 検査が %s のため、提出不可です。' % zstatus)
+            if not all(res.get(k) for k in keys):
+                print('   → FAIL の項目があるため、提出不可です。')
+            print('     提出せず、数値をそのまま報告してください。')
+        print('=' * 64)
+        return
 
     print('\n7. 条件G（肩紐の角度）／ 10. 顔')
     print('   ★ この 2 項目は自動測定できません。')
