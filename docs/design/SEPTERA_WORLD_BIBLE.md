@@ -1055,7 +1055,8 @@
 - [開発方針（正式決定）](../DEVELOPMENT_POLICY.md) — **第 9 節は本文書と 4 点で食い違う（0-3）。改訂には承認が必要**
 - [Candy Kingdom 世界観統合ビジュアル（素材制作・測定・登録の記録）](CANDY_KINGDOM_VISUAL_INTEGRATION.md) — **測定規則（11-5・12-9）と登録済み 16 素材の実測値は本文書でもそのまま引き継ぐ。初灯の受け入れ記録は 12-0 〜 12-11**
 - [Candy Kingdom パズル版 構想試作](CANDY_KINGDOM_PUZZLE_CONCEPT.md) — **旧仮称による構想試作の記録。世界観の名称としては使わない**
-- [メインプレイ画面 デザイン方向案](MAIN_PLAY_DESIGN_DIRECTIONS.md) — A2-HW-R と N1 の色トークンと実測
+- [メインプレイ画面 デザイン方向案](MAIN_PLAY_DESIGN_DIRECTIONS.md) — 2A。A2-HW-R と N1 の色トークンと実測
+- [メインプレイ画面 デザインシステム 2B](MAIN_PLAY_DESIGN_SYSTEM_2B.md) — **手順 4 の成果物（草案・未確定）。**手順 3 で **A2-HW-R** が採用され、**登録済み人物ラフ 10 人 11 枚は本番素材を制作するための造形参照として採用された**。**登録ラフの PNG をそのまま本番素材として使わない。**本番人物画像は透明背景で別途制作する（同文書 2 節）
 - [メインプレイ画面 UI 監査](../audits/MAIN_PLAY_UI_AUDIT.md)
 - [Phase 2C 人間評価結果](../evaluations/PHASE2C_HUMAN_EVALUATION.md)
 - 登録済み素材：[`assets/approved-small/`](assets/approved-small/)（Small 8 点）／[`assets/approved-regular/`](assets/approved-regular/)（Regular 8 点）
