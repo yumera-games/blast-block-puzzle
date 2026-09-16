@@ -55,6 +55,7 @@ const hooks: SceneHooks = {
     metrics.onIllegalDrop();
   },
   onStageStart(state) {
+    preloadFigure();
     const intro = tutorial.takeIntro(state.def);
     if (intro) showCard({ title: `STAGE ${state.def.id}`, body: intro, buttons: [{ label: 'START', primary: true }] });
     else hideCard();
@@ -131,6 +132,60 @@ function fitToAvailableSpace(): void {
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 250));
 
+/* ------------------------------------------------------------ 人物画像（装飾） */
+
+/**
+ * 勝利リザルトにだけ出す装飾。**情報ではない。**
+ * 読めなくても結果画面が成立することを壊さない（2B 4-1 / 4-10-1）。
+ * 表示は 125x296 CSS px 固定で、人物外接の実表示高は 274px（2B 4-2）。
+ */
+const FIGURE_W = 125;
+const FIGURE_H = 296;
+// public/ はそのまま配信されるので、base './' を壊さない BASE_URL から組み立てる。
+const FIGURE_1X = `${import.meta.env.BASE_URL}characters/nei-result-1x.webp`;
+const FIGURE_2X = `${import.meta.env.BASE_URL}characters/nei-result-2x.webp`;
+
+/** 320〜374px では出さない（2B 4-16 の案 1）。**先読みもしない。** */
+function figureAllowed(): boolean {
+  return window.matchMedia('(min-width: 375px)').matches;
+}
+
+/** 取得に失敗したと分かっている間は、最初から差し込まない。 */
+let figureBroken = false;
+
+/** ステージ開始時に読んでおく。結果画面の表示を待たせない（2B 4-10-1）。 */
+function preloadFigure(): void {
+  if (figureBroken || !figureAllowed()) return;
+  const img = new Image();
+  img.onerror = () => {
+    figureBroken = true;
+  };
+  img.srcset = `${FIGURE_1X} 1x, ${FIGURE_2X} 2x`;
+  img.src = FIGURE_1X;
+}
+
+/**
+ * alt は空、aria-hidden は true。**装飾なので支援技術へ読ませない**（2B 4-18）。
+ * width / height 属性を付けて、読み込み中でもレイアウトが動かないようにする。
+ */
+function figureHtml(): string {
+  if (figureBroken || !figureAllowed()) return '';
+  return (
+    `<div class="fig"><img alt="" aria-hidden="true" width="${FIGURE_W}" height="${FIGURE_H}" ` +
+    `src="${FIGURE_1X}" srcset="${FIGURE_1X} 1x, ${FIGURE_2X} 2x"></div>`
+  );
+}
+
+/** 取得に失敗したら**枠ごと消す。**125x296 の空白を残さない（2B 4-10-1）。 */
+function watchFigure(): void {
+  const img = overlayCard.querySelector<HTMLImageElement>('.fig img');
+  if (!img) return;
+  img.addEventListener('error', () => {
+    figureBroken = true;
+    img.closest('.fig')?.remove();
+  });
+}
+
 /* -------------------------------------------------------------- オーバーレイ */
 
 interface CardButton {
@@ -139,14 +194,24 @@ interface CardButton {
   readonly onClick?: () => void;
 }
 
-function showCard(opts: { title: string; titleClass?: string; body?: string; stats?: string; buttons: CardButton[] }): void {
+function showCard(opts: {
+  title: string;
+  titleClass?: string;
+  /** 人物画像を見出しの下へ入れる。勝利リザルトだけ true（2B 4-1 / 4-7）。 */
+  figure?: boolean;
+  body?: string;
+  stats?: string;
+  buttons: CardButton[];
+}): void {
   overlayCard.innerHTML =
     `<h2 class="${opts.titleClass ?? ''}">${escapeHtml(opts.title)}</h2>` +
+    (opts.figure ? figureHtml() : '') +
     (opts.body ? `<p>${escapeHtml(opts.body)}</p>` : '') +
     (opts.stats ? `<div class="stats">${escapeHtml(opts.stats)}</div>` : '') +
     `<div class="btns">${opts.buttons
       .map((b, i) => `<button class="btn${b.primary ? ' primary' : ''}" data-i="${i}">${escapeHtml(b.label)}</button>`)
       .join('')}</div>`;
+  watchFigure();
   overlayCard.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
       const i = Number(btn.getAttribute('data-i'));
@@ -166,6 +231,7 @@ function showClear(state: StageState): void {
   showCard({
     title: 'STAGE CLEAR',
     titleClass: 'ok',
+    figure: true,
     // 教材ステージだけ「いま盤面で何が起きたか」を答え合わせする。文言はステージデータ側。
     body: state.def.tutorial.outro,
     stats: `SCORE ${state.score}   MOVES USED ${state.movesUsed}   MAX CHAIN ${state.maxChain}`,
