@@ -55,6 +55,8 @@ const hooks: SceneHooks = {
     metrics.onIllegalDrop();
   },
   onStageStart(state) {
+    // RETRY・STAGE SELECT・次ステージのいずれもここを通る。失敗演出を捨てる。
+    clearFailEffect();
     preloadFigure();
     const intro = tutorial.takeIntro(state.def);
     if (intro) showCard({ title: `STAGE ${state.def.id}`, body: intro, buttons: [{ label: 'START', primary: true }] });
@@ -109,6 +111,7 @@ function resize(): void {
   game.canvas.style.width = `${layout.cssWidth}px`;
   game.canvas.style.height = `${layout.cssHeight}px`;
   scene.applyLayout(layout);
+  if (boardDim.classList.contains('on')) placeBoardDim();
 }
 
 /**
@@ -186,6 +189,44 @@ function watchFigure(): void {
   });
 }
 
+/* ------------------------------------------------------ 失敗 A の演出（3-16-4） */
+
+/**
+ * **盤面 canvas の表示領域だけ**を覆う暗転。HUD・操作列・結果カードは対象にしない。
+ * 盤面の画素は書き換えず、上へ半透明の面を重ねるだけ（2B 3-16-4-1 の 8）。
+ */
+const boardDim = document.createElement('div');
+boardDim.id = 'boardDim';
+boardDim.setAttribute('aria-hidden', 'true');
+document.body.appendChild(boardDim);
+
+/** 失敗演出の未完了タイマー。破棄の条件は 3-16-4-1 の 10。 */
+let failTimers: number[] = [];
+
+const reduceMotion = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** 保留中のタイマーだけ捨てる。**暗転は消さない**（210ms のカード表示で使うため）。 */
+function cancelFailTimers(): void {
+  failTimers.forEach((id) => clearTimeout(id));
+  failTimers = [];
+}
+
+/** タイマーも暗転も捨てる。ステージが変わるときと、カードを閉じるとき。 */
+function clearFailEffect(): void {
+  cancelFailTimers();
+  boardDim.classList.remove('on', 'instant');
+}
+
+/** 盤面の矩形へ合わせる。layout は**デバイスピクセル**なので dpr で割る。 */
+function placeBoardDim(): void {
+  const r = game.canvas.getBoundingClientRect();
+  const k = 1 / layout.dpr;
+  boardDim.style.left = `${r.left + layout.boardX * k}px`;
+  boardDim.style.top = `${r.top + layout.boardY * k}px`;
+  boardDim.style.width = `${layout.boardW * k}px`;
+  boardDim.style.height = `${layout.boardH * k}px`;
+}
+
 /* -------------------------------------------------------------- オーバーレイ */
 
 interface CardButton {
@@ -207,9 +248,14 @@ function showCard(opts: {
 }): void {
   // 前のカードのクラスを残さない。intro や失敗カードへ勝利の面色が移らないようにする。
   overlayCard.className = opts.cardClass ? `card ${opts.cardClass}` : 'card';
-  // 幕は #overlay が持つ。勝利だけ 3-16-2 の `rgba(30,24,41,0.62)` にする（3-16-2-1）。
-  // ここで毎回 toggle するので、次のカードへ勝利の幕が残らない。
+  // 幕は #overlay が持つ。勝利 `rgba(30,24,41,0.62)`（3-16-2-1）と
+  // 失敗 `rgba(30,24,41,0.58)`（3-16-4-1）。ここで毎回 toggle するので、
+  // 次のカードへ前の幕が残らず、勝利と失敗が同時に付くこともない。
   overlay.classList.toggle('win', opts.cardClass === 'win');
+  overlay.classList.toggle('failed', opts.cardClass === 'failed');
+  // 別のカードが出た時点で、保留中の失敗演出は捨てる。
+  // 古いタイマーが別ステージへ失敗カードを出さないようにする（3-16-4-1 の 10）。
+  cancelFailTimers();
   overlayCard.innerHTML =
     `<h2 class="${opts.titleClass ?? ''}">${escapeHtml(opts.title)}</h2>` +
     (opts.figure ? figureHtml() : '') +
@@ -231,8 +277,9 @@ function showCard(opts: {
 
 function hideCard(): void {
   overlay.classList.remove('on');
-  // 勝利の幕も落とす。閉じている間も状態を残さない（3-16-2-1）。
-  overlay.classList.remove('win');
+  // 勝利・失敗の幕も落とす。閉じている間も状態を残さない（3-16-2-1 / 3-16-4-1）。
+  overlay.classList.remove('win', 'failed');
+  clearFailEffect();
 }
 
 function showClear(state: StageState): void {
@@ -257,15 +304,40 @@ function showClear(state: StageState): void {
   });
 }
 
+/**
+ * 失敗 A（3-16-4 / 3-16-4-1）。**ゲームの失敗確定は時刻 0** で、入力は
+ * `GameScene.onDown` が `status !== 'playing'` で弾いている。ここは演出だけ。
+ *
+ *   0〜90ms   失敗確定（すでに済んでいる）
+ *   90ms      盤面暗転の開始 → 120ms linear
+ *   210ms     結果カードの表示開始 → 200ms
+ *   410ms     完了
+ *
+ * `prefers-reduced-motion: reduce` では待たせず、暗転の最終状態とカードを即時出す。
+ */
 function showFailed(state: StageState): void {
   const reason = state.moves <= 0 ? 'MOVES がなくなりました' : 'どの候補も置けません';
-  showCard({
-    title: 'FAILED',
-    titleClass: 'ng',
-    body: reason,
-    stats: `SCORE ${state.score}`,
-    buttons: [{ label: 'RETRY', primary: true, onClick: () => retryStage() }],
-  });
+  const card = (): void =>
+    showCard({
+      title: 'FAILED',
+      titleClass: 'ng',
+      cardClass: 'failed',
+      body: reason,
+      stats: `SCORE ${state.score}`,
+      buttons: [{ label: 'RETRY', primary: true, onClick: () => retryStage() }],
+    });
+
+  // 連続して呼ばれても重ねない（3-16-4-1 の 10）。
+  clearFailEffect();
+  placeBoardDim();
+
+  if (reduceMotion()) {
+    boardDim.classList.add('instant', 'on');
+    card();
+    return;
+  }
+  failTimers.push(window.setTimeout(() => boardDim.classList.add('on'), 90));
+  failTimers.push(window.setTimeout(card, 210));
 }
 
 function retryStage(): void {

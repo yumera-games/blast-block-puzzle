@@ -104,13 +104,78 @@ button.btn.narrow { flex: 0 0 64px; }
 #overlay .stats { font-size: 12px; color: var(--muted); margin: 10px 0; }
 #overlay .btns { display: flex; gap: 6px; margin-top: 12px; }
 
+/* 失敗 A（2B 3-16-4 / 3-16-4-1）。**盤面 canvas の表示領域だけ**を覆う暗転。
+   位置と寸法は main.ts が layout から計算して付ける。入力は素通りさせる。
+   z-index は canvas より上、#overlay(20) より下。 */
+#boardDim {
+  position: fixed;
+  z-index: 10;
+  pointer-events: none;
+  background: rgba(20, 16, 22, 0.42);
+  opacity: 0;
+  transition: opacity 120ms linear;
+}
+#boardDim.on { opacity: 1; }
+/* reduced-motion では待たせない。最終状態を即時適用する（3-16-4-1 の 9）。 */
+#boardDim.instant { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  #boardDim { transition: none; }
+}
+
+/* 失敗 A の幕。**失敗カードを表示している間だけ。** */
+#overlay.failed { background: rgba(30, 24, 41, 0.58); }
+
+/* 失敗 A のカード。ハッチ帯を角丸からはみ出させないため overflow を切る。 */
+#overlay .card.failed {
+  position: relative;
+  overflow: hidden;
+  background: #ede1ed;
+  border-color: #1c2b4c;
+}
+#overlay .card.failed h2.ng { color: #312925; }
+#overlay .card.failed p { color: #29182b; }
+#overlay .card.failed .stats { color: #6b5f6f; }
+#overlay .card.failed .btn.primary {
+  background: linear-gradient(90deg, #a89ffa 0%, #cf62ea 100%);
+  border-color: #a89ffa;
+  color: #241d30;
+}
+/* ハッチ帯：高さ 12px、地 #e0d2e2、45° の #a0180e を線幅 2px・周期 8px。
+   文字は載せない。::before / ::after とも装飾で、読み上げ対象にならない。 */
+#overlay .card.failed::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 12px;
+  background: repeating-linear-gradient(45deg, #a0180e 0 2px, #e0d2e2 2px 8px);
+}
+/* 中央の × は 2 本の斜線で描く。文字グリフは使わない。外接 10x10、線幅 2px。 */
+#overlay .card.failed::after {
+  content: '';
+  position: absolute;
+  top: 1px; left: 50%;
+  width: 10px; height: 10px;
+  margin-left: -5px;
+  background:
+    linear-gradient(45deg, transparent calc(50% - 1px), #a0180e calc(50% - 1px),
+      #a0180e calc(50% + 1px), transparent calc(50% + 1px)),
+    linear-gradient(-45deg, transparent calc(50% - 1px), #a0180e calc(50% - 1px),
+      #a0180e calc(50% + 1px), transparent calc(50% + 1px));
+}
+/* カードの出現 200ms（3-16-4-1 の 8）。reduced-motion では実行しない。 */
+@keyframes failCardIn { from { opacity: 0; } to { opacity: 1; } }
+#overlay.failed .card.failed { animation: failCardIn 200ms linear; }
+@media (prefers-reduced-motion: reduce) {
+  #overlay.failed .card.failed { animation: none; }
+}
+
 /* 勝利 A の幕。2B 3-16-2 / 3-16-2-1。**勝利カードを表示している間だけ。**
-   intro / 失敗カード / STAGE SELECT は上の従来値 rgba(10,12,16,.78) のまま。
-   幕の変化にアニメーションは付けない。 */
+   失敗カードは上の `#overlay.failed`、intro / STAGE SELECT は従来値
+   rgba(10,12,16,.78) のまま。幕の変化にアニメーションは付けない。 */
 #overlay.win { background: rgba(30, 24, 41, 0.62); }
 
 /* 勝利 A の確定配色。2B 3-16-2 の値をそのまま使う。**勝利カードだけ**に当てる。
-   intro / 失敗カード / STAGE SELECT は従来どおり共通トークンのまま。
+   intro / STAGE SELECT は従来どおり共通トークンのまま。
    共通変数（--panel / --line / --ok / --muted / --text）は変更しない。 */
 #overlay .card.win { background: #2b2438; border-color: #5a4c6e; }
 #overlay .card.win h2.ok { color: #e8a51f; }
