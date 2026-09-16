@@ -191,10 +191,34 @@ button.btn.narrow { flex: 0 0 64px; }
   color: #241d30;
 }
 
-/* 勝利リザルトの人物（装飾）。寸法は 2B 4-2、前後の間隔は 4-7 の最小 8px。
-   アニメーションは持たせない（演出を増やさない）。 */
+/* 勝利リザルトの人物（装飾）。寸法は 2B 4-2、前後の間隔は 4-7 の最小 8px。 */
 #overlay .fig { margin: 8px 0; line-height: 0; }
 #overlay .fig img { display: block; width: 125px; height: 296px; margin: 0 auto; }
+
+/* idle 段階 1 の呼吸（2B 7-3-1）。**方式 A：受け入れ済みの静止 WebP を
+   そのまま拡縮するだけで、画像も寸法も 1 画素たりとも変えない。**
+   transform だけを使うのでレイアウト再計算は起きず、カード高さも変わらない。
+
+   基準点 284.5px は **人物外接の最下行**（125x296 の要素内で α 外接は
+   y=11..284.5）。足元を固定するため、上下移動は使わない。
+   1.004 倍で頭頂は約 1.10px 上がり、上端の張り出しは約 1.14px で、
+   見出しとの 8px の間隔に収まる。
+
+   **talk へ進む時点で方式 C へ移行し、このブロックは撤去する**（7-3-1 の 8）。 */
+@keyframes neiBreath {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.004); }
+  100% { transform: scale(1); }
+}
+/* 勝利カードの人物だけ。intro・失敗カード・STAGE SELECT・盤面には当てない。 */
+#overlay .card.win .fig img {
+  transform-origin: 50% 284.5px;
+  animation: neiBreath 4s ease-in-out 0s infinite normal none;
+}
+/* 完全停止。等倍の静止画へ戻す（7-3-1 の 5）。 */
+@media (prefers-reduced-motion: reduce) {
+  #overlay .card.win .fig img { animation: none; transform: none; }
+}
 
 /* ------------------------------------------------------------------ debug */
 #debug { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom));
