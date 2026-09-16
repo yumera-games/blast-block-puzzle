@@ -104,6 +104,11 @@ button.btn.narrow { flex: 0 0 64px; }
 #overlay .stats { font-size: 12px; color: var(--muted); margin: 10px 0; }
 #overlay .btns { display: flex; gap: 6px; margin-top: 12px; }
 
+/* 勝利 A の幕。2B 3-16-2 / 3-16-2-1。**勝利カードを表示している間だけ。**
+   intro / 失敗カード / STAGE SELECT は上の従来値 rgba(10,12,16,.78) のまま。
+   幕の変化にアニメーションは付けない。 */
+#overlay.win { background: rgba(30, 24, 41, 0.62); }
+
 /* 勝利 A の確定配色。2B 3-16-2 の値をそのまま使う。**勝利カードだけ**に当てる。
    intro / 失敗カード / STAGE SELECT は従来どおり共通トークンのまま。
    共通変数（--panel / --line / --ok / --muted / --text）は変更しない。 */

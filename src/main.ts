@@ -207,6 +207,9 @@ function showCard(opts: {
 }): void {
   // 前のカードのクラスを残さない。intro や失敗カードへ勝利の面色が移らないようにする。
   overlayCard.className = opts.cardClass ? `card ${opts.cardClass}` : 'card';
+  // 幕は #overlay が持つ。勝利だけ 3-16-2 の `rgba(30,24,41,0.62)` にする（3-16-2-1）。
+  // ここで毎回 toggle するので、次のカードへ勝利の幕が残らない。
+  overlay.classList.toggle('win', opts.cardClass === 'win');
   overlayCard.innerHTML =
     `<h2 class="${opts.titleClass ?? ''}">${escapeHtml(opts.title)}</h2>` +
     (opts.figure ? figureHtml() : '') +
@@ -228,6 +231,8 @@ function showCard(opts: {
 
 function hideCard(): void {
   overlay.classList.remove('on');
+  // 勝利の幕も落とす。閉じている間も状態を残さない（3-16-2-1）。
+  overlay.classList.remove('win');
 }
 
 function showClear(state: StageState): void {
