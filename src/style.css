@@ -104,10 +104,22 @@ button.btn.narrow { flex: 0 0 64px; }
 #overlay .stats { font-size: 12px; color: var(--muted); margin: 10px 0; }
 #overlay .btns { display: flex; gap: 6px; margin-top: 12px; }
 
-/* 勝利 A のカード面。2B 3-16-2 で確定した #2b2438。**勝利カードだけ**に当てる。
-   intro / 失敗カード / STAGE SELECT は従来どおり var(--panel) のまま。
-   枠・文字・ボタンの色は 3-16-2 に確定値があるが、今回は面だけを変える。 */
-#overlay .card.win { background: #2b2438; }
+/* 勝利 A の確定配色。2B 3-16-2 の値をそのまま使う。**勝利カードだけ**に当てる。
+   intro / 失敗カード / STAGE SELECT は従来どおり共通トークンのまま。
+   共通変数（--panel / --line / --ok / --muted / --text）は変更しない。 */
+#overlay .card.win { background: #2b2438; border-color: #5a4c6e; }
+#overlay .card.win h2.ok { color: #e8a51f; }
+#overlay .card.win p { color: #cfc6d6; }
+#overlay .card.win .stats { color: #e6e0ea; }
+/* ボタンは 3-16-2 の「#a89ffa → #cf62ea」。勾配の向きは 3-16-2 に指定が無いため、
+   読み順に合わせて左→右とした（**この向きだけは 3-16-2 の記載ではない**）。
+   3-16-2 はボタンを 1 種類しか規定していないので、**主ボタンにだけ**当てる。
+   副ボタンの色は 3-16-2 に記載が無く、創作しないため共通のままにする。 */
+#overlay .card.win .btn.primary {
+  background: linear-gradient(90deg, #a89ffa 0%, #cf62ea 100%);
+  border-color: #a89ffa;
+  color: #241d30;
+}
 
 /* 勝利リザルトの人物（装飾）。寸法は 2B 4-2、前後の間隔は 4-7 の最小 8px。
    アニメーションは持たせない（演出を増やさない）。 */
