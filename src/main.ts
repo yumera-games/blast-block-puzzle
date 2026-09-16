@@ -197,12 +197,16 @@ interface CardButton {
 function showCard(opts: {
   title: string;
   titleClass?: string;
+  /** カードに足すクラス。勝利だけ 'win'（2B 3-16-2 の面色）。毎回入れ替える。 */
+  cardClass?: string;
   /** 人物画像を見出しの下へ入れる。勝利リザルトだけ true（2B 4-1 / 4-7）。 */
   figure?: boolean;
   body?: string;
   stats?: string;
   buttons: CardButton[];
 }): void {
+  // 前のカードのクラスを残さない。intro や失敗カードへ勝利の面色が移らないようにする。
+  overlayCard.className = opts.cardClass ? `card ${opts.cardClass}` : 'card';
   overlayCard.innerHTML =
     `<h2 class="${opts.titleClass ?? ''}">${escapeHtml(opts.title)}</h2>` +
     (opts.figure ? figureHtml() : '') +
@@ -231,6 +235,7 @@ function showClear(state: StageState): void {
   showCard({
     title: 'STAGE CLEAR',
     titleClass: 'ok',
+    cardClass: 'win',
     figure: true,
     // 教材ステージだけ「いま盤面で何が起きたか」を答え合わせする。文言はステージデータ側。
     body: state.def.tutorial.outro,

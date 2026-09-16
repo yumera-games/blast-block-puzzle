@@ -104,6 +104,11 @@ button.btn.narrow { flex: 0 0 64px; }
 #overlay .stats { font-size: 12px; color: var(--muted); margin: 10px 0; }
 #overlay .btns { display: flex; gap: 6px; margin-top: 12px; }
 
+/* 勝利 A のカード面。2B 3-16-2 で確定した #2b2438。**勝利カードだけ**に当てる。
+   intro / 失敗カード / STAGE SELECT は従来どおり var(--panel) のまま。
+   枠・文字・ボタンの色は 3-16-2 に確定値があるが、今回は面だけを変える。 */
+#overlay .card.win { background: #2b2438; }
+
 /* 勝利リザルトの人物（装飾）。寸法は 2B 4-2、前後の間隔は 4-7 の最小 8px。
    アニメーションは持たせない（演出を増やさない）。 */
 #overlay .fig { margin: 8px 0; line-height: 0; }
