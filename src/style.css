@@ -193,33 +193,107 @@ button.btn.narrow { flex: 0 0 64px; }
 
 /* 勝利リザルトの人物（装飾）。寸法は 2B 4-2、前後の間隔は 4-7 の最小 8px。 */
 #overlay .fig { margin: 8px 0; line-height: 0; }
-#overlay .fig img { display: block; width: 125px; height: 296px; margin: 0 auto; }
 
-/* idle 段階 1 の呼吸（2B 7-3-1）。**方式 A：受け入れ済みの静止 WebP を
-   そのまま拡縮するだけで、画像も寸法も 1 画素たりとも変えない。**
-   transform だけを使うのでレイアウト再計算は起きず、カード高さも変わらない。
+/* 方式 C（2B 7-4-1）。**3 枚を同じ座標へ重ねる。**外形は 125x296 のまま変えない。
+   重ね順は DOM 順で決まる：lower → upper → head（手前が head。7-4-1 の 5-1）。 */
+#overlay .figStack {
+  position: relative;
+  width: 125px;
+  height: 296px;
+  margin: 0 auto;
+}
+#overlay .figStack .layUpper,
+#overlay .figStack .layHead { position: absolute; inset: 0; }
+#overlay .figStack img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 125px;
+  height: 296px;
+}
+
+/* idle 段階 1 の呼吸（2B 7-3-1・7-4-1 の 6）。
+   **方式 C へ移行したので、呼吸は個別画像ではなくレイヤー群の共通親へ当てる**
+   （7-4-1 の 6 の 1〜7）。当てる場所は `.figStack` の 1 か所だけで、
+   子レイヤーへは重複適用しない。画像も寸法も 1 画素たりとも変えない。
 
    基準点 284.5px は **人物外接の最下行**（125x296 の要素内で α 外接は
    y=11..284.5）。足元を固定するため、上下移動は使わない。
    1.006 倍で頭頂は約 1.64px 上がり、上端の張り出しは約 1.71px で、
    見出しとの 8px の間隔に収まる。振幅は 0.4% と 0.6% を実寸の動画で見比べて
-   0.6% を採った。**判定したのは ChatGPT で、利用者本人はまだ見ていない**
-   （7-3-1 の 2 ／ 7-3-2 ／ 7-3-3）。
-
-   **talk へ進む時点で方式 C へ移行し、このブロックは撤去する**（7-3-1 の 8）。 */
+   0.6% を採り、**本人が 0.6% を選んだ**（7-3-1 の 2 ／ 7-3-4）。 */
 @keyframes neiBreath {
   0%   { transform: scale(1); }
   50%  { transform: scale(1.006); }
   100% { transform: scale(1); }
 }
 /* 勝利カードの人物だけ。intro・失敗カード・STAGE SELECT・盤面には当てない。 */
-#overlay .card.win .fig img {
+#overlay .card.win .figStack {
   transform-origin: 50% 284.5px;
   animation: neiBreath 4s ease-in-out 0s infinite normal none;
 }
-/* 完全停止。等倍の静止画へ戻す（7-3-1 の 5）。 */
+
+/* M2 の talk 反応（2B 7-4-1 の 4・6 の 8）。**子レイヤー側へ当てる。**
+   `.layUpper` は腰（master y=1370 ＝ この要素の 156.4px）、
+   `.layHead` は首（master y=470 ＝ 53.7px）を基準に回す。
+   head は upper の子なので**上体に追従したうえで**首の分だけ余分に回る。
+   lower には一切当てない。足元は動かない（6 の 9）。
+
+   **可動範囲・時間・イージングは仮値である**（7-4-1 の 9 の 2 は未確定）。
+   制作上の安全範囲 80 master px（＝ 9.13 CSS px。7-4-1 の 5-4）に対して、
+   ここで動く量は腰から首までで 1px 未満に収めている。 */
+@keyframes neiTalkUpper {
+  0%   { transform: translateY(0) rotate(0deg); }
+  25%  { transform: translateY(-0.7px) rotate(-0.4deg); }
+  60%  { transform: translateY(0.3px) rotate(0.15deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+@keyframes neiTalkHead {
+  0%   { transform: rotate(0deg); }
+  20%  { transform: rotate(-0.7deg); }
+  58%  { transform: rotate(0.35deg); }
+  100% { transform: rotate(0deg); }
+}
+#overlay .card.win.talking .figStack .layUpper {
+  transform-origin: 50% 156.4px;
+  animation: neiTalkUpper 1000ms ease-in-out 0s 1 normal none;
+}
+#overlay .card.win.talking .figStack .layHead {
+  transform-origin: 50% 53.7px;
+  animation: neiTalkHead 1000ms ease-in-out 0s 1 normal none;
+}
+
+/* ネイの talk 欄（A 案 1 行。2B 7-4-1 の 2）。
+   **人物の直下。教材本文は消さずに下へ残す。**話者名を出す。
+   内側の実幅は 375/393/430 で 284px、320 で 232px になるよう左右 11px を取る。
+   **320px でも出す**（人物が出ないことと talk を出さないことは別。7-4-1 の 2）。
+   配色は勝利 A の確定値（3-16-2）だけを使う。**talk 欄専用の配色は未確定**
+   （7-4-1 の 9 の 3）なので、新しい色も面も枠も作らない。
+   表示は opacity だけで切り替える。**カード高さは最初から変わらない**（同 8 の 7）。 */
+#overlay .card.win .talk {
+  margin: 8px 0 0;
+  padding: 6px 11px;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+  opacity: 0;
+}
+#overlay .card.win.talking .talk { opacity: 1; }
+#overlay .card.win .talk .who { color: #e6e0ea; font-weight: 700; margin-right: 8px; }
+#overlay .card.win .talk .line { color: #cfc6d6; }
+
+/* レイヤーが読めずフォールバックした場合。受け入れ済みの静止画 1 枚へ戻す。
+   呼吸は親に付いたまま残り、talk の上体反応だけが無くなる（7-3-1 の 4）。 */
+#overlay .figStack.flat img { position: static; margin: 0 auto; }
+
+/* 完全停止（7-3-1 の 5 ／ 7-4-1 の 6 の 10・11）。
+   呼吸と talk の動きを両方止め、**台詞は即時表示する。** */
 @media (prefers-reduced-motion: reduce) {
-  #overlay .card.win .fig img { animation: none; transform: none; }
+  #overlay .card.win .figStack,
+  #overlay .card.win.talking .figStack .layUpper,
+  #overlay .card.win.talking .figStack .layHead { animation: none; transform: none; }
+  #overlay .card.win .talk { transition: none; }
 }
 
 /* ------------------------------------------------------------------ debug */

@@ -145,8 +145,14 @@ window.addEventListener('orientationchange', () => setTimeout(resize, 250));
 const FIGURE_W = 125;
 const FIGURE_H = 296;
 // public/ はそのまま配信されるので、base './' を壊さない BASE_URL から組み立てる。
-const FIGURE_1X = `${import.meta.env.BASE_URL}characters/nei-result-1x.webp`;
-const FIGURE_2X = `${import.meta.env.BASE_URL}characters/nei-result-2x.webp`;
+const FIGURE_BASE = `${import.meta.env.BASE_URL}characters/`;
+/** 方式 A の受け入れ済み静止画。**削除しない。**方式 C が読めないときのフォールバック
+ *  として残す（2B 7-3-1 の「将来シイを独立して動かす場合の方針」2）。 */
+const FIGURE_1X = `${FIGURE_BASE}nei-result-1x.webp`;
+const FIGURE_2X = `${FIGURE_BASE}nei-result-2x.webp`;
+/** 方式 C の 3 レイヤー。**重ね順は head ＞ upper ＞ lower**（2B 7-4-1 の 5-1）。
+ *  DOM の後ろほど手前になるので、この配列の順に書き出す。 */
+const FIGURE_LAYERS = ['lower', 'upper', 'head'] as const;
 
 /** 320〜374px では出さない（2B 4-16 の案 1）。**先読みもしない。** */
 function figureAllowed(): boolean {
@@ -156,37 +162,113 @@ function figureAllowed(): boolean {
 /** 取得に失敗したと分かっている間は、最初から差し込まない。 */
 let figureBroken = false;
 
-/** ステージ開始時に読んでおく。結果画面の表示を待たせない（2B 4-10-1）。 */
+function layerSrc(name: string, scale: '1x' | '2x'): string {
+  return `${FIGURE_BASE}nei-result-${name}-${scale}.webp`;
+}
+
+/** ステージ開始時に読んでおく。結果画面の表示を待たせない（2B 4-10-1）。
+ *  **フォールバックの静止画は先読みしない。**1 端末が取る 1 セットを増やさない
+ *  （2B 7-3-1 の 7）。 */
 function preloadFigure(): void {
   if (figureBroken || !figureAllowed()) return;
-  const img = new Image();
-  img.onerror = () => {
-    figureBroken = true;
-  };
-  img.srcset = `${FIGURE_1X} 1x, ${FIGURE_2X} 2x`;
-  img.src = FIGURE_1X;
+  for (const name of FIGURE_LAYERS) {
+    const img = new Image();
+    img.srcset = `${layerSrc(name, '1x')} 1x, ${layerSrc(name, '2x')} 2x`;
+    img.src = layerSrc(name, '1x');
+  }
 }
 
 /**
  * alt は空、aria-hidden は true。**装飾なので支援技術へ読ませない**（2B 4-18）。
  * width / height 属性を付けて、読み込み中でもレイアウトが動かないようにする。
+ *
+ * 入れ子は 2 関節の骨組み（2B 7-4-1 の 4・6）。
+ *   .figStack … 呼吸 0.6% を**ここ 1 か所だけ**に当てる（6 の 1〜7）
+ *   .layUpper … talk の上体反応。基準は腰 y=1370（master）
+ *   .layHead  … 上体に追従したうえでの首の追加回転。基準は首 y=470（master）
+ * head を upper の子にしているので、**上体が動いても首が離れない。**
  */
 function figureHtml(): string {
   if (figureBroken || !figureAllowed()) return '';
+  const lay = (name: string): string =>
+    `<img class="lay lay-${name}" alt="" aria-hidden="true" width="${FIGURE_W}" height="${FIGURE_H}" ` +
+    `src="${layerSrc(name, '1x')}" srcset="${layerSrc(name, '1x')} 1x, ${layerSrc(name, '2x')} 2x">`;
   return (
-    `<div class="fig"><img alt="" aria-hidden="true" width="${FIGURE_W}" height="${FIGURE_H}" ` +
-    `src="${FIGURE_1X}" srcset="${FIGURE_1X} 1x, ${FIGURE_2X} 2x"></div>`
+    '<div class="fig"><div class="figStack">' +
+    lay('lower') +
+    `<div class="layUpper">${lay('upper')}<div class="layHead">${lay('head')}</div></div>` +
+    '</div></div>'
   );
 }
 
-/** 取得に失敗したら**枠ごと消す。**125x296 の空白を残さない（2B 4-10-1）。 */
+/**
+ * レイヤーが 1 枚でも読めなければ、**受け入れ済みの静止画 1 枚へ戻す**。
+ * その静止画も読めなければ枠ごと消す。125x296 の空白を残さない（2B 4-10-1）。
+ */
 function watchFigure(): void {
-  const img = overlayCard.querySelector<HTMLImageElement>('.fig img');
-  if (!img) return;
-  img.addEventListener('error', () => {
+  const stack = overlayCard.querySelector<HTMLElement>('.figStack');
+  if (!stack) return;
+  const dropFigure = (): void => {
     figureBroken = true;
-    img.closest('.fig')?.remove();
-  });
+    stack.closest('.fig')?.remove();
+  };
+  const toFlat = (): void => {
+    if (stack.classList.contains('flat')) return;
+    stack.classList.add('flat');
+    stack.innerHTML =
+      `<img alt="" aria-hidden="true" width="${FIGURE_W}" height="${FIGURE_H}" ` +
+      `src="${FIGURE_1X}" srcset="${FIGURE_1X} 1x, ${FIGURE_2X} 2x">`;
+    stack.querySelector('img')?.addEventListener('error', dropFigure);
+  };
+  stack.querySelectorAll('img').forEach((img) => img.addEventListener('error', toFlat));
+}
+
+/* --------------------------------------------------- ネイの talk（2B 7-4-1） */
+
+/** 確定台詞は 1 文だけ（2B 7-4-1 の 3）。**2 文目以降は未確定なので作らない。** */
+const TALK_SPEAKER = 'ネイ';
+const TALK_LINE = '記録完了。次も確かめよう。';
+/** カード表示から台詞を出すまで。**仮値。**7-4-1 の 9 の 2 は未確定のまま。 */
+const TALK_DELAY_MS = 220;
+
+/** A 案 1 行（2B 7-4-1 の 2）。**320px でも出す。**人物の有無とは別（同 2）。 */
+function talkHtml(): string {
+  return (
+    '<div class="talk">' +
+    `<span class="who">${escapeHtml(TALK_SPEAKER)}</span>` +
+    `<span class="line">${escapeHtml(TALK_LINE)}</span>` +
+    '</div>'
+  );
+}
+
+/** talk 用の未完了タイマー。破棄の条件は 7-4-1 の 7。 */
+let talkTimers: number[] = [];
+/** カードが差し替わったことを検出する通し番号。detached DOM を触らないために使う。 */
+let cardSerial = 0;
+
+function cancelTalkTimers(): void {
+  talkTimers.forEach((id) => clearTimeout(id));
+  talkTimers = [];
+}
+
+/**
+ * 台詞と M2 の上体反応を始める。**進行の条件にはしない**（7-3-1 の 6）。
+ * `prefers-reduced-motion` では**待たせずに台詞だけ出す**（7-4-1 の 6 の 11）。
+ * 動きの停止は CSS 側のメディアクエリが行う。
+ */
+function startTalk(): void {
+  cancelTalkTimers();
+  const serial = cardSerial;
+  const run = (): void => {
+    // 別のカードへ変わっている／閉じているなら何もしない（7-4-1 の 7 の 4・5）。
+    if (serial !== cardSerial || !overlay.classList.contains('on')) return;
+    overlayCard.classList.add('talking');
+  };
+  if (reduceMotion()) {
+    run();
+    return;
+  }
+  talkTimers.push(window.setTimeout(run, TALK_DELAY_MS));
 }
 
 /* ------------------------------------------------------ 失敗 A の演出（3-16-4） */
@@ -242,6 +324,8 @@ function showCard(opts: {
   cardClass?: string;
   /** 人物画像を見出しの下へ入れる。勝利リザルトだけ true（2B 4-1 / 4-7）。 */
   figure?: boolean;
+  /** ネイの talk 欄を人物の直下へ入れる。勝利リザルトだけ true（2B 7-4-1 の 2）。 */
+  talk?: boolean;
   body?: string;
   stats?: string;
   buttons: CardButton[];
@@ -256,9 +340,13 @@ function showCard(opts: {
   // 別のカードが出た時点で、保留中の失敗演出は捨てる。
   // 古いタイマーが別ステージへ失敗カードを出さないようにする（3-16-4-1 の 10）。
   cancelFailTimers();
+  // talk も同じ。**前のカードの talk 状態を次のカードへ持ち越さない**（7-4-1 の 7 の 4）。
+  cancelTalkTimers();
+  cardSerial++;
   overlayCard.innerHTML =
     `<h2 class="${opts.titleClass ?? ''}">${escapeHtml(opts.title)}</h2>` +
     (opts.figure ? figureHtml() : '') +
+    (opts.talk ? talkHtml() : '') +
     (opts.body ? `<p>${escapeHtml(opts.body)}</p>` : '') +
     (opts.stats ? `<div class="stats">${escapeHtml(opts.stats)}</div>` : '') +
     `<div class="btns">${opts.buttons
@@ -280,6 +368,11 @@ function hideCard(): void {
   // 勝利・失敗の幕も落とす。閉じている間も状態を残さない（3-16-2-1 / 3-16-4-1）。
   overlay.classList.remove('win', 'failed');
   clearFailEffect();
+  // talk 反応を即時中断し、タイマーを全部捨てる（7-4-1 の 7 の 1・2）。
+  // カード DOM は次の showCard で作り直すので、talk 用要素も同時に消える（同 3）。
+  cancelTalkTimers();
+  cardSerial++;
+  overlayCard.classList.remove('talking');
 }
 
 function showClear(state: StageState): void {
@@ -289,6 +382,7 @@ function showClear(state: StageState): void {
     titleClass: 'ok',
     cardClass: 'win',
     figure: true,
+    talk: true,
     // 教材ステージだけ「いま盤面で何が起きたか」を答え合わせする。文言はステージデータ側。
     body: state.def.tutorial.outro,
     stats: `SCORE ${state.score}   MOVES USED ${state.movesUsed}   MAX CHAIN ${state.maxChain}`,
@@ -302,6 +396,8 @@ function showClear(state: StageState): void {
           { label: 'NEXT STAGE', primary: true, onClick: () => goStage(state.def.id + 1) },
         ],
   });
+  // 表示のあとに始める。**カードの表示を待たせない**（7-3-1 の 6）。
+  startTalk();
 }
 
 /**
