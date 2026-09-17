@@ -235,53 +235,58 @@ button.btn.narrow { flex: 0 0 64px; }
 }
 
 /* M2 の talk 反応（2B 7-4-1 の 4・6 の 8）。**子レイヤー側へ当てる。**
-   `.layUpper` は腰（master y=1370 ＝ この要素の 156.4px）、
-   `.layHead` は首（master y=470 ＝ 53.7px）を基準に回す。
-   head は upper の子なので**上体に追従したうえで**首の分だけ余分に回る。
-   lower には一切当てない。足元は動かない（6 の 9）。
+   基準は腰（master y=1370 ＝ `.layUpper` の 156.4px）。lower には一切当てない。
+   足元は動かない（6 の 9）。
 
-   **可動範囲・時間・イージングは仮値である**（7-4-1 の 9 の 2 は未確定）。
-   制作上の安全範囲 80 master px（＝ 9.13 CSS px。7-4-1 の 5-4）に対して、
-   ここで動く量は腰から首までで 1px 未満に収めている。 */
+   **頭に独立した変形を与えない。**【確】（2026-09-17 の人間判断）
+   頭と上体へ別々の動きを当てた最初の実装は、実機で
+   「首から上と首から下が別物のような動きで、人間の自然な動きに見えない」と
+   判定されて不合格になった。head は `.layUpper` の子なので、変形を持たなければ
+   上体と完全に一体で動く。**`.layHead` へアニメーションを書かないこと自体が仕様である。**
+
+   量ではなく動き方を変えた 4 案を実機で見比べ、**「一体のまま 2 回」を採った**。
+   2 回にしているのは、1 回では「動いている」と分かりにくかったため。 */
 @keyframes neiTalkUpper {
   0%   { transform: translateY(0) rotate(0deg); }
-  25%  { transform: translateY(-0.7px) rotate(-0.4deg); }
-  60%  { transform: translateY(0.3px) rotate(0.15deg); }
+  18%  { transform: translateY(-1.3px) rotate(-0.38deg); }
+  38%  { transform: translateY(0.2px) rotate(0.06deg); }
+  56%  { transform: translateY(-1px) rotate(-0.3deg); }
+  78%  { transform: translateY(0.15px) rotate(0.05deg); }
   100% { transform: translateY(0) rotate(0deg); }
-}
-@keyframes neiTalkHead {
-  0%   { transform: rotate(0deg); }
-  20%  { transform: rotate(-0.7deg); }
-  58%  { transform: rotate(0.35deg); }
-  100% { transform: rotate(0deg); }
 }
 #overlay .card.win.talking .figStack .layUpper {
   transform-origin: 50% 156.4px;
-  animation: neiTalkUpper 1000ms ease-in-out 0s 1 normal none;
+  animation: neiTalkUpper 1400ms ease-in-out 0s 1 normal none;
 }
-#overlay .card.win.talking .figStack .layHead {
-  transform-origin: 50% 53.7px;
-  animation: neiTalkHead 1000ms ease-in-out 0s 1 normal none;
-}
+/* `.layHead` は上体へ追従させるためだけの入れ物。**変形を与えない。** */
 
 /* ネイの talk 欄（A 案 1 行。2B 7-4-1 の 2）。
    **人物の直下。教材本文は消さずに下へ残す。**話者名を出す。
    内側の実幅は 375/393/430 で 284px、320 で 232px になるよう左右 11px を取る。
    **320px でも出す**（人物が出ないことと talk を出さないことは別。7-4-1 の 2）。
-   配色は勝利 A の確定値（3-16-2）だけを使う。**talk 欄専用の配色は未確定**
-   （7-4-1 の 9 の 3）なので、新しい色も面も枠も作らない。
+   配色は勝利 A の確定値（3-16-2）だけを使う。新しい色も面も枠も作らない。
+   **文字は 13px / グレーで実機「薄い・小さい」と判定されたため、
+   15px ／ 話者名を見出しと同じ金色 `#e8a51f` ／ 台詞を `#f2ecf6` に変えた**
+   （2026-09-17 の人間判断。3 案を実機で見比べて選択）。
    表示は opacity だけで切り替える。**カード高さは最初から変わらない**（同 8 の 7）。 */
 #overlay .card.win .talk {
   margin: 8px 0 0;
   padding: 6px 11px;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
   text-align: left;
   opacity: 0;
 }
 #overlay .card.win.talking .talk { opacity: 1; }
-#overlay .card.win .talk .who { color: #e6e0ea; font-weight: 700; margin-right: 8px; }
-#overlay .card.win .talk .line { color: #cfc6d6; }
+#overlay .card.win .talk .who { color: #e8a51f; font-weight: 700; margin-right: 8px; }
+#overlay .card.win .talk .line { color: #f2ecf6; }
+/* 320 では内側が 232px しかなく、15px では話者名と同じ行に置くと台詞が折れる。
+   **話者名を独立した行へ落として、台詞そのものは 1 行に保つ**（7-4-1 の 2 の
+   「原則 1 行」を守る。同節は 320 で 2 行になること自体は許しているが、
+   語の途中で折れるのは読みにくい）。人物は 375px 未満では元から出さない。 */
+@media (max-width: 374px) {
+  #overlay .card.win .talk .who { display: block; margin-right: 0; }
+}
 
 /* レイヤーが読めずフォールバックした場合。受け入れ済みの静止画 1 枚へ戻す。
    呼吸は親に付いたまま残り、talk の上体反応だけが無くなる（7-3-1 の 4）。 */
@@ -291,8 +296,7 @@ button.btn.narrow { flex: 0 0 64px; }
    呼吸と talk の動きを両方止め、**台詞は即時表示する。** */
 @media (prefers-reduced-motion: reduce) {
   #overlay .card.win .figStack,
-  #overlay .card.win.talking .figStack .layUpper,
-  #overlay .card.win.talking .figStack .layHead { animation: none; transform: none; }
+  #overlay .card.win.talking .figStack .layUpper { animation: none; transform: none; }
   #overlay .card.win .talk { transition: none; }
 }
 
