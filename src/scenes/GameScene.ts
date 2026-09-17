@@ -107,6 +107,11 @@ export class GameScene extends Phaser.Scene {
   private shownWaves = 0;
   private hint: TutorialHint | null = null;
 
+  /** resolution 演出が所有する TimerEvent。**破棄の対象はここにあるものだけ。** */
+  private resolutionTimers = new Set<Phaser.Time.TimerEvent>();
+  /** resolution 演出の世代。破棄のたびに 1 進める。古い callback の guard に使う。 */
+  private resolutionGen = 0;
+
   constructor(hooks: SceneHooks) {
     super('game');
     this.hooks = hooks;
@@ -145,6 +150,10 @@ export class GameScene extends Phaser.Scene {
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMove(p));
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onUp(p));
     this.input.on('pointerupoutside', (p: Phaser.Input.Pointer) => this.onUp(p));
+
+    // Scene が止まる・壊されるときにも必ず捨てる（破棄処理は 1 か所だけ）。
+    this.events.on(Phaser.Scenes.Events.SHUTDOWN, this.clearResolutionSchedule, this);
+    this.events.on(Phaser.Scenes.Events.DESTROY, this.clearResolutionSchedule, this);
   }
 
   override update(): void {
@@ -157,6 +166,8 @@ export class GameScene extends Phaser.Scene {
   // ------------------------------------------------------------------- stage
 
   loadStage(id: number): void {
+    // 前のステージの演出タイマーを、新しい StageState を作る**前に**捨てる。
+    this.clearResolutionSchedule();
     this.state = new StageState(stageById(id));
     this.view = this.state.board.clone();
     this.teach = this.state.def.tutorial.teach ?? [];
@@ -176,6 +187,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   retry(): void {
+    // RETRY も同じ。盤面を戻す**前に**演出タイマーを捨てる。
+    this.clearResolutionSchedule();
     this.state.reset();
     this.view = this.state.board.clone();
     this.teachHeld = false;
@@ -447,20 +460,59 @@ export class GameScene extends Phaser.Scene {
 
   // --------------------------------------------------------------- resolution
 
+  /**
+   * resolution 演出のタイマーを積む**唯一の入口**。
+   *
+   * Phaser の `delayedCall` は Scene の Clock に積まれるだけで、
+   * `loadStage()` / `retry()` は Clock を触らない。そのため演出の途中で
+   * ステージが変わると、**古い resolution の callback が新しい StageState へ
+   * 作用する。**実ブラウザで再現した（1 wave 演出中に RETRY すると、
+   * 生き残った `applyEvent` が作り直した表示盤面から 7 セルを消し、
+   * 約 330ms 後に `syncView` が戻すまで初期行が消えて見えた）。
+   *
+   * **破棄（Set から外して Clock から除去）と guard（世代と StageState の
+   * 一致確認）の二重防御**にしてある。片方が漏れても新しい状態へ作用しない。
+   * 演出の時間値は 1ms も変えていない。
+   */
+  private scheduleResolution(delay: number, fn: () => void): void {
+    const gen = this.resolutionGen;
+    const owner = this.state;
+    const timer = this.time.delayedCall(delay, () => {
+      this.resolutionTimers.delete(timer);
+      // 破棄が間に合わなかった場合の 2 段目。世代か StageState が違えば何もしない。
+      if (gen !== this.resolutionGen || owner !== this.state) return;
+      fn();
+    });
+    this.resolutionTimers.add(timer);
+  }
+
+  /**
+   * 積んである resolution 演出のタイマーをすべて止め、世代を 1 進める。
+   * **破棄はこの 1 か所だけ。**各所で同じ処理を書かない。
+   * `time.removeAllEvents()` は使わない（このシーンが所有しないタイマーまで消える）。
+   */
+  private clearResolutionSchedule(): void {
+    for (const timer of this.resolutionTimers) this.time.removeEvent(timer);
+    this.resolutionTimers.clear();
+    this.resolutionGen++;
+  }
+
   /** resolution 中はユーザー入力を無効化する。 */
   private playResolution(result: ResolutionResult): void {
+    // 前の resolution が残っていれば、ここで必ず捨てる。
+    this.clearResolutionSchedule();
     this.busy = true;
     this.resetTeachVisuals();
     let t = TIMING.snap;
 
     for (const ev of result.events) {
       const at = t;
-      this.time.delayedCall(at, () => this.showLines(ev));
-      this.time.delayedCall(at + TIMING.lineHighlight, () => this.applyEvent(ev));
+      this.scheduleResolution(at, () => this.showLines(ev));
+      this.scheduleResolution(at + TIMING.lineHighlight, () => this.applyEvent(ev));
       t = at + TIMING.lineHighlight + TIMING.removeFade + TIMING.betweenChains;
     }
 
-    this.time.delayedCall(t, () => {
+    this.scheduleResolution(t, () => {
       this.chainNow = 0;
       this.syncView();
 
@@ -562,7 +614,11 @@ export class GameScene extends Phaser.Scene {
 
   private finishTurn(): void {
     this.emit();
-    if (this.state.status !== 'playing') this.hooks.onStageEnd(this.state);
+    if (this.state.status !== 'playing') {
+      // 勝利・失敗で表示処理を終えるとき。ここから先に演出タイマーを残さない。
+      this.clearResolutionSchedule();
+      this.hooks.onStageEnd(this.state);
+    }
   }
 
   // ------------------------------------------------------------------ drawing

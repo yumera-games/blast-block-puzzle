@@ -163,6 +163,28 @@ async function geom() {
   });
 }
 
+/** 任意の page でトレイ i を (row,col) へドラッグする（⑧ の別ページ用）。 */
+async function dragOn(p, i, row, col) {
+  const g = await p.evaluate(() => {
+    const r = document.querySelector('#game canvas').getBoundingClientRect();
+    const l = window.__blast.state().layout;
+    return { left: r.left, top: r.top, k: r.width / l.width, l };
+  });
+  const dims = await p.evaluate((idx) => {
+    const s = window.__blast.scene.stageState.tray[idx];
+    return { w: s.shape.width, h: s.shape.height };
+  }, i);
+  const trayCx = g.left + ((i + 0.5) * (g.l.width / 3)) * g.k;
+  const trayCy = g.top + (g.l.trayY + g.l.trayH / 2) * g.k;
+  const x = g.left + (g.l.boardX + col * g.l.cell + (dims.w * g.l.cell) / 2) * g.k;
+  const y = g.top + (g.l.boardY + row * g.l.cell + (dims.h * g.l.cell) / 2 + g.l.cell * 1.15) * g.k;
+  await p.mouse.move(trayCx, trayCy);
+  await p.mouse.down();
+  await p.mouse.move((trayCx + x) / 2, (trayCy + y) / 2, { steps: 6 });
+  await p.mouse.move(x, y, { steps: 6 });
+  await p.mouse.up();
+}
+
 /** トレイ i のピースを (row,col) へドラッグする。ドラッグ中の持ち上げ量も合わせる。 */
 async function drag(i, row, col, useTouch) {
   const g = await geom();
@@ -396,6 +418,145 @@ await page.evaluate(() => window.__blast.goStage(1));
 await page.waitForTimeout(300);
 await page.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
 await page.screenshot({ path: 'tools/out/stage01.png' });
+
+
+/* ------------------------------ ⑧ 演出タイマーの世代管理（中断しても残らない） ----
+ *
+ * `GameScene.playResolution()` が積む TimerEvent は Scene の Clock に載るだけなので、
+ * 演出の途中でステージが変わると古い callback が新しい StageState へ作用しうる。
+ * ここは**実ブラウザで**その中断経路を踏み、残存タイマー 0 件・古い callback 実行 0 件・
+ * 表示盤面と論理盤面の一致を確認する。
+ */
+{
+  const tctx = await browser.newContext({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const tp = await tctx.newPage();
+  const terrs = [];
+  tp.on('pageerror', (e) => terrs.push(String(e.message)));
+  tp.on('console', (m) => { if (m.type() === 'error') terrs.push('console: ' + m.text()); });
+  await tp.goto(URL, { waitUntil: 'networkidle' });
+  await tp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  await tp.waitForTimeout(400);
+
+  /** showLines / applyEvent / syncView の呼び出しを数える（ゲーム側は書き換えない）。 */
+  const arm = () =>
+    tp.evaluate(() => {
+      const sc = window.__blast.scene;
+      if (window.__t) { window.__t.calls.length = 0; return; }
+      window.__t = { calls: [] };
+      for (const n of ['showLines', 'applyEvent', 'syncView']) {
+        const orig = sc[n].bind(sc);
+        sc[n] = function (...a) { window.__t.calls.push(n); return orig(...a); };
+      }
+    });
+  const probe = () =>
+    tp.evaluate(() => {
+      const sc = window.__blast.scene;
+      const b = sc.stageState.board.toStrings().join('|');
+      const v = sc.view.toStrings().join('|');
+      return {
+        calls: window.__t.calls.slice(),
+        owned: sc.resolutionTimers.size,
+        clockActive: sc.time._active.length + sc.time._pendingInsertion.length,
+        boardEqualsView: b === v,
+        stage: sc.stageState.def.id,
+        busy: sc.busy, chainNow: sc.chainNow, fading: sc.fading.length, flashes: sc.flashes.length,
+        teachHold: sc.teachHold !== null,
+      };
+    });
+  const start = async (id) => {
+    await tp.evaluate((n) => window.__blast.goStage(n), id);
+    await tp.waitForTimeout(220);
+    await tp.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
+    await tp.waitForTimeout(80);
+  };
+  /** そのステージの想定解を、最後の 1 手を残して打つ。 */
+  const playToLast = async (id) => {
+    const mv = SOLUTIONS[id];
+    for (let i = 0; i < mv.length - 1; i++) {
+      await dragOn(tp, ...mv[i]);
+      await tp.waitForTimeout(1300);
+      await tp.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
+    }
+    return mv[mv.length - 1];
+  };
+
+  // (1) 正常な resolution では callback が予定どおりの回数だけ動く（CHAIN 2 ＝ 2 波）
+  await start(9);
+  const last9 = await playToLast(9);
+  await arm();
+  await dragOn(tp, ...last9);
+  await tp.waitForTimeout(1800);
+  const normal = await probe();
+  const n = (x) => normal.calls.filter((c) => c === x).length;
+  if (!(n('showLines') === 2 && n('applyEvent') === 2 && n('syncView') === 1))
+    ng.push(`演出タイマー: 通常の CHAIN 2 で callback 回数が違う ${JSON.stringify(normal.calls)}`);
+  else if (normal.owned !== 0)
+    ng.push(`演出タイマー: 通常終了後に ${normal.owned} 件残っている`);
+  else note.push('  演出タイマー: 通常の CHAIN 2 で showLines 2 / applyEvent 2 / syncView 1、終了後の残存 0');
+
+  // (2)(3) 演出の途中で RETRY → 残存 0・古い callback 0・表示盤面が論理盤面と一致
+  for (const [label, id, at] of [['通常1wave', 2, 150], ['CHAIN2', 9, 300], ['COMBO', 12, 300]]) {
+    await start(id);
+    const lastMv = await playToLast(id);
+    await dragOn(tp, ...lastMv);
+    await tp.waitForTimeout(at);
+    await arm();
+    await tp.evaluate(() => document.getElementById('btnRetry').click());
+    const justAfter = await probe();
+    let worstMismatch = justAfter.boardEqualsView ? 0 : 1;
+    for (let i = 0; i < 20; i++) {
+      await tp.waitForTimeout(60);
+      const s = await probe();
+      if (!s.boardEqualsView) worstMismatch = 1;
+    }
+    const end = await probe();
+    if (justAfter.owned !== 0 || justAfter.clockActive !== 0)
+      ng.push(`演出タイマー: ${label} 中の RETRY 後に owned=${justAfter.owned} clock=${justAfter.clockActive} 残っている`);
+    if (end.calls.length !== 0)
+      ng.push(`演出タイマー: ${label} 中の RETRY 後に古い callback が ${end.calls.length} 回動いた ${JSON.stringify(end.calls)}`);
+    if (worstMismatch)
+      ng.push(`演出タイマー: ${label} 中の RETRY 後に表示盤面が論理盤面と食い違った`);
+    if (end.busy || end.chainNow !== 0 || end.fading !== 0 || end.flashes !== 0 || end.teachHold)
+      ng.push(`演出タイマー: ${label} 中の RETRY 後に演出状態が初期値でない ${JSON.stringify(end)}`);
+  }
+  note.push('  演出タイマー: 通常1wave / CHAIN2 / COMBO の演出中に RETRY しても残存 0・古い callback 0・表示盤面一致');
+
+  // (4) 連続した破棄が安全（演出中に 2 回続けてステージを変える）
+  await start(2);
+  await dragOn(tp, 0, 7, 7);
+  await tp.waitForTimeout(150);
+  await arm();
+  await tp.evaluate(() => { window.__blast.goStage(3); window.__blast.goStage(4); });
+  await tp.waitForTimeout(1600);
+  const multi = await probe();
+  if (multi.stage !== 4 || multi.owned !== 0 || multi.calls.length !== 0 || !multi.boardEqualsView)
+    ng.push(`演出タイマー: 連続ステージ変更が安全でない ${JSON.stringify(multi)}`);
+  else note.push('  演出タイマー: 演出中に 2 回続けてステージを変えても残存 0・古い callback 0');
+
+  // (5) Scene shutdown 後に callback が動かない
+  await start(9);
+  const last9b = await playToLast(9);
+  await dragOn(tp, ...last9b);
+  await tp.waitForTimeout(300);
+  await arm();
+  // Phaser は scene.stop() を次の step まで遅らせるので、1 フレーム待ってから数える。
+  const before = await tp.evaluate(() => {
+    const sc = window.__blast.scene;
+    const n = sc.resolutionTimers.size;
+    sc.scene.stop();
+    return n;
+  });
+  await tp.waitForTimeout(1500);
+  const owned = { before, after: await tp.evaluate(() => window.__blast.scene.resolutionTimers.size) };
+  const afterStop = await tp.evaluate(() => window.__t.calls.slice());
+  if (owned.before === 0) ng.push('演出タイマー: shutdown 検査の前提（演出中）が成立していない');
+  else if (owned.after !== 0) ng.push(`演出タイマー: shutdown 後も ${owned.after} 件残っている`);
+  else if (afterStop.length !== 0) ng.push(`演出タイマー: shutdown 後に callback が ${afterStop.length} 回動いた`);
+  else note.push(`  演出タイマー: shutdown で ${owned.before} 件を破棄し、以後 callback は動かない`);
+
+  if (terrs.length) ng.push(`演出タイマー検査中に エラー ${terrs.length} 件 — ${terrs[0]}`);
+  await tctx.close();
+}
 
 if (errs.length) ng.push(`操作中に エラー ${errs.length} 件 — ${errs[0]}`);
 
