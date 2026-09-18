@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { GameScene, type SceneHooks } from './scenes/GameScene';
 import { Hud } from './ui/Hud';
 import { TutorialOverlay } from './ui/TutorialOverlay';
+import type { AttackPlacement } from './game/attack';
 import { DebugPanel } from './ui/DebugPanel';
 import { PlayMetrics } from './ui/PlayMetrics';
 import { computeLayout, type Layout } from './ui/layout';
@@ -54,10 +55,14 @@ const hooks: SceneHooks = {
   onIllegalDrop() {
     metrics.onIllegalDrop();
   },
+  onAttack(placement) {
+    setAttack(placement);
+  },
   onStageStart(state) {
     // RETRY・STAGE SELECT・次ステージのいずれもここを通る。失敗演出を捨てる。
     clearFailEffect();
     preloadFigure();
+    preloadAttack();
     const intro = tutorial.takeIntro(state.def);
     if (intro) showCard({ title: `STAGE ${state.def.id}`, body: intro, buttons: [{ label: 'START', primary: true }] });
     else hideCard();
@@ -169,6 +174,14 @@ function layerSrc(name: string, scale: '1x' | '2x'): string {
 /** ステージ開始時に読んでおく。結果画面の表示を待たせない（2B 4-10-1）。
  *  **フォールバックの静止画は先読みしない。**1 端末が取る 1 セットを増やさない
  *  （2B 7-3-1 の 7）。 */
+/** attack の配信用派生を先読みする。**srcset なので 1 端末が取るのは 1 点だけ。** */
+function preloadAttack(): void {
+  if (attackBroken) return;
+  const img = new Image();
+  img.srcset = `${ATTACK_1X} 1x, ${ATTACK_2X} 2x`;
+  img.src = ATTACK_1X;
+}
+
 function preloadFigure(): void {
   if (figureBroken || !figureAllowed()) return;
   for (const name of FIGURE_LAYERS) {
@@ -221,6 +234,60 @@ function watchFigure(): void {
     stack.querySelector('img')?.addEventListener('error', dropFigure);
   };
   stack.querySelectorAll('img').forEach((img) => img.addEventListener('error', toFlat));
+}
+
+/* ------------------------------------------------ ネイの attack（2B 7-5-9） */
+
+/** 配信用派生。**srcset で 1 端末が取るのは片方だけ**（2B 7-5-2 の 5）。 */
+const ATTACK_1X = `${FIGURE_BASE}nei-attack-1x.webp`;
+const ATTACK_2X = `${FIGURE_BASE}nei-attack-2x.webp`;
+
+/**
+ * attack の表示要素。**document flow へ参加しない。**
+ * `position: fixed` なので HUD・目的欄・ヒント行・操作列・canvas の矩形を変えない。
+ * 装飾なので `aria-hidden`、操作を遮らないよう `pointer-events: none`。
+ *
+ * **`idle` は「この要素が非表示の状態」**（2B 7-5-9。常時表示の idle 素材は無い）。
+ * 要素は 1 つだけ作り、出し入れで使い回す。勝利カードの `.figStack` とは別物で、
+ * 互いに触らない。
+ */
+const attackImg = document.createElement('img');
+attackImg.id = 'attackFigure';
+attackImg.alt = '';
+attackImg.setAttribute('aria-hidden', 'true');
+attackImg.decoding = 'async';
+attackImg.src = ATTACK_1X;
+attackImg.srcset = `${ATTACK_1X} 1x, ${ATTACK_2X} 2x`;
+document.body.appendChild(attackImg);
+
+/** 取得に失敗したら二度と出さない。**ゲーム進行は止めない**（2B 7-3-1 の 6）。 */
+let attackBroken = false;
+attackImg.addEventListener('error', () => {
+  attackBroken = true;
+  attackImg.classList.remove('on');
+});
+
+/**
+ * attack の出し入れ。**表示の責務はこの関数 1 つだけ。**
+ * 後から reduced-motion の分岐を足すときも、ここ 1 か所で済むようにしている
+ * （具体値は未確定。2B 7-5-9 の 12）。
+ */
+function setAttack(place: AttackPlacement | null): void {
+  if (!place || attackBroken) {
+    attackImg.classList.remove('on');
+    return;
+  }
+  // GameScene は **canvas 左上を原点**にした値を渡す。`position: fixed` は
+  // viewport 原点なので、ここで canvas の現在位置を足す。
+  // 小数 CSS px のまま渡す。丸めるのは外接の幅・高さと R・B だけ（2B 7-5-9 の 5）。
+  const canvas = document.querySelector('#game canvas');
+  if (!canvas) return;
+  const r = canvas.getBoundingClientRect();
+  attackImg.style.left = `${r.left + place.img.left}px`;
+  attackImg.style.top = `${r.top + place.img.top}px`;
+  attackImg.style.width = `${place.img.width}px`;
+  attackImg.style.height = `${place.img.height}px`;
+  attackImg.classList.add('on');
 }
 
 /* --------------------------------------------------- ネイの talk（2B 7-4-1） */

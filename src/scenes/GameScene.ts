@@ -6,6 +6,7 @@ import type { TutorialHint } from '../data/stages';
 import type { Cell, Piece, ResolutionEvent, ResolutionResult } from '../game/types';
 import { comboPreviewLabel } from '../data/combos';
 import { type ComboLink, TEACH_PROMPT, type TeachKind, comboLinkOf, waveMark, waveNotice } from '../data/resultText';
+import { type AttackPlacement, attackEndMs, attackPlacement, hasCombo } from '../game/attack';
 import { arrowEndpoints, cellCenter } from '../ui/teachDraw';
 import { previewPlacement, type PreviewResult } from '../game/Preview';
 import { CELL_COLOR, CELL_EDGE, UI } from '../ui/colors';
@@ -38,6 +39,8 @@ export interface SceneHooks {
   onPreview?(key: string, preview: PreviewResult | null): void;
   onPlaced?(state: StageState, result: ResolutionResult | null, shownPreview: PreviewResult | null): void;
   onIllegalDrop?(): void;
+  /** ネイの attack 表示。`null` で消す。**表示の責務はここ 1 か所だけ**（2B 7-5-9）。 */
+  onAttack?(placement: AttackPlacement | null): void;
 }
 
 interface FadingCell {
@@ -111,6 +114,8 @@ export class GameScene extends Phaser.Scene {
   private resolutionTimers = new Set<Phaser.Time.TimerEvent>();
   /** resolution 演出の世代。破棄のたびに 1 進める。古い callback の guard に使う。 */
   private resolutionGen = 0;
+  /** attack を出しているか。**解除を 1 か所へ集めるためだけの旗。** */
+  private attackShown = false;
 
   constructor(hooks: SceneHooks) {
     super('game');
@@ -495,6 +500,26 @@ export class GameScene extends Phaser.Scene {
     for (const timer of this.resolutionTimers) this.time.removeEvent(timer);
     this.resolutionTimers.clear();
     this.resolutionGen++;
+    // **attack の解除はここ 1 か所だけ。**Retry / Stage 変更 / loadStage /
+    // SHUTDOWN / DESTROY / status≠playing の finishTurn / 次の playResolution の
+    // 先頭は、すべてこの関数を通る（2B 7-5-9 の 8）。経路ごとに DOM を触らない。
+    this.endAttack();
+  }
+
+  /** attack を出す。`hasCombo` が true の手で、波 1 の `showLines` の直後にだけ呼ぶ。 */
+  private startAttack(): void {
+    const l = this.layout;
+    // 盤面矩形は**ここで 1 回だけ**読む。表示中は読み直さない（2B 7-5-9 の 5）。
+    const place = attackPlacement(l.boardX / l.dpr, l.boardY / l.dpr, l.boardW / l.dpr);
+    this.attackShown = true;
+    this.hooks.onAttack?.(place);
+  }
+
+  /** attack を消す。出していないときは何もしない（多重解除で DOM を触らない）。 */
+  private endAttack(): void {
+    if (!this.attackShown) return;
+    this.attackShown = false;
+    this.hooks.onAttack?.(null);
   }
 
   /** resolution 中はユーザー入力を無効化する。 */
@@ -504,13 +529,23 @@ export class GameScene extends Phaser.Scene {
     this.busy = true;
     this.resetTeachVisuals();
     let t = TIMING.snap;
+    // **COMBO かどうかは 1 手につき 1 回だけ判定する。**波ごとに数え直さない。
+    const attack = hasCombo(result);
 
-    for (const ev of result.events) {
+    for (const [i, ev] of result.events.entries()) {
       const at = t;
-      this.scheduleResolution(at, () => this.showLines(ev));
+      const first = i === 0;
+      this.scheduleResolution(at, () => {
+        this.showLines(ev);
+        // **同じ delay へ 2 本積むと実行順が決まらない。**波 1 の callback の中から
+        // 呼んで、コード上で順序を一意にする（2B 7-5-9 の 3）。
+        if (first && attack) this.startAttack();
+      });
       this.scheduleResolution(at + TIMING.lineHighlight, () => this.applyEvent(ev));
       t = at + TIMING.lineHighlight + TIMING.removeFade + TIMING.betweenChains;
     }
+    // 終了は**波 2 に依存させない。**490ms で独立して消える（2B 7-5-9 の 3）。
+    if (attack) this.scheduleResolution(attackEndMs(TIMING.snap), () => this.endAttack());
 
     this.scheduleResolution(t, () => {
       this.chainNow = 0;

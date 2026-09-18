@@ -332,3 +332,17 @@ button.btn.narrow { flex: 0 0 64px; }
   background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
   border-radius: 6px; font: inherit; font-size: 11px; padding: 3px 8px; cursor: pointer;
 }
+
+/* ネイの attack（2B 7-5-9）。**document flow へ参加しない。**
+   位置と寸法は GameScene が attack 開始時に 1 回だけ決めて JS が書き込む
+   （盤面矩形から算出。表示中は再計算しない）。ここでは出し入れだけを持つ。
+   装飾なので操作を遮らず、支援技術へも読ませない。 */
+#attackFigure {
+  position: fixed;
+  display: none;
+  pointer-events: none;
+  /* canvas より上、失敗時の暗転 #boardDim(10) と勝利カード #overlay(20) より下。
+     結果表示や会話が人物で隠れない。 */
+  z-index: 5;
+}
+#attackFigure.on { display: block; }

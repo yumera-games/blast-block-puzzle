@@ -558,6 +558,117 @@ await page.screenshot({ path: 'tools/out/stage01.png' });
   await tctx.close();
 }
 
+/* ⑨ ネイの attack（2B 7-5-9 ／ 工程 V-3）。
+   **時間分離が実機で成り立っているか**を、実操作で確かめる。
+   単体テストは規則（大きさ・位置・COMBO 判定）だけを見るので、
+   「中央文字と 1ms も同時に出ない」「表示中に動かない」はここで見る。 */
+{
+  const ATK = `(() => {
+    const e = document.getElementById('attackFigure');
+    const on = e && e.classList.contains('on');
+    const sc = window.__blast.scene, l = window.__blast.state().layout, dpr = devicePixelRatio;
+    const cv = document.querySelector('#game canvas').getBoundingClientRect();
+    const b = on ? e.getBoundingClientRect() : null;
+    return {
+      on: !!on,
+      r: b ? { x: +b.x.toFixed(3), y: +b.y.toFixed(3), w: +b.width.toFixed(3), h: +b.height.toFixed(3) } : null,
+      txt: ['chainText','comboNameText','comboNoteText','chainNoteText','teachPromptText','keepLabelText']
+        .filter((n) => { const t = sc[n]; return t && t.alpha > 0.01 && t.visible && t.text; }).length,
+      link: !!sc.comboLink,
+      board: { x: +(cv.x + l.boardX / dpr).toFixed(2), y: +(cv.y + l.boardY / dpr).toFixed(2), w: +(l.boardW / dpr).toFixed(2) },
+      sy: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+      sx: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  })()`;
+  const rhu = (v) => Math.floor(v + 0.5);
+  for (const [vw, vh] of [[320, 568], [393, 852], [430, 932]]) {
+    const actx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: 2 });
+    const ap = await actx.newPage();
+    await ap.goto(URL, { waitUntil: 'networkidle' });
+    await ap.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+    await ap.evaluate(() => window.__blast.goStage(10));
+    await ap.waitForTimeout(350);
+    await ap.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
+    await ap.waitForTimeout(400);
+
+    const samples = [];
+    await ap.evaluate(`(() => { window.__AT = []; const f = () => {
+      window.__AT.push(${ATK}); requestAnimationFrame(f); }; requestAnimationFrame(f); })()`);
+    await dragOn(ap, 0, 7, 2);
+    await ap.waitForTimeout(1600);
+    samples.push(...(await ap.evaluate(() => window.__AT)));
+
+    const shown = samples.filter((s) => s.on);
+    const tag = `attack ${vw}x${vh}`;
+    if (shown.length === 0) {
+      ng.push(`${tag}: COMBO 成立手で attack が出ない`);
+    } else {
+      const first = shown[0];
+      const side = first.board.w;
+      const h = rhu(side * 0.63);
+      const w = rhu((h * 1404) / 2400);
+      const inset = rhu((side / 8) * 0.25);
+      const sc = h / 2400;
+      // img から α 外接を戻す（img は透明余白 96s を含む）
+      const right = first.r.x + 96 * sc + 1404 * sc;
+      const bottom = first.r.y + 96 * sc + 2400 * sc;
+      if (Math.abs(1404 * sc - w) > 0.5 || Math.abs(2400 * sc - h) > 0.5)
+        ng.push(`${tag}: 外接 ${(1404 * sc).toFixed(1)}x${(2400 * sc).toFixed(1)} が規則の ${w}x${h} と違う`);
+      else if (Math.abs(right - (first.board.x + side - inset)) > 0.6 || Math.abs(bottom - (first.board.y + side - inset)) > 0.6)
+        ng.push(`${tag}: P-1 位置がずれている（右端差 ${(right - (first.board.x + side - inset)).toFixed(2)}）`);
+      else if (shown.some((s) => s.txt > 0 || s.link))
+        ng.push(`${tag}: attack と中央文字 / comboLink が同時に出た`);
+      else if (shown.some((s) => s.r.x !== first.r.x || s.r.y !== first.r.y || s.r.w !== first.r.w || s.r.h !== first.r.h))
+        ng.push(`${tag}: 表示中に人物が動いた`);
+      else if (shown.some((s) => s.board.x !== first.board.x || s.board.y !== first.board.y || s.board.w !== first.board.w))
+        ng.push(`${tag}: 表示中に盤面矩形が動いた`);
+      else if (shown.some((s) => s.r.x < 0 || s.r.y < 0 || s.r.x + s.r.w > vw || s.r.y + s.r.h > vh))
+        ng.push(`${tag}: viewport の外へ欠けた`);
+      else if (samples.some((s) => s.sy !== 0 || s.sx !== 0))
+        ng.push(`${tag}: スクロールが発生した`);
+      else if (samples.some((s) => !s.on && s.txt === 0 && s.link) )
+        ng.push(`${tag}: comboLink が attack より先に出た`);
+      else
+        note.push(`  ${tag}: 外接 ${w}x${h}（盤面辺 ${side}）／表示 ${shown.length} フレーム／中央文字と同時 0／移動 0／欠け 0`);
+    }
+
+    // 単独起爆の CHAIN 2 では出ない
+    await ap.evaluate(() => window.__blast.goStage(9));
+    await ap.waitForTimeout(350);
+    await ap.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
+    await ap.waitForTimeout(400);
+    await ap.evaluate(`(() => { window.__AT = []; const f = () => {
+      window.__AT.push(${ATK}); requestAnimationFrame(f); }; requestAnimationFrame(f); })()`);
+    for (const m of [[0, 7, 4], [1, 7, 0], [2, 7, 5]]) {
+      try { await dragOn(ap, ...m); } catch { /* 置けない手は飛ばす */ }
+      await ap.waitForTimeout(1400);
+    }
+    const soloShown = (await ap.evaluate(() => window.__AT)).filter((s) => s.on).length;
+    if (soloShown > 0) ng.push(`${tag}: 単独起爆の手で attack が ${soloShown} フレーム出た`);
+    else note.push(`  ${tag}: 単独起爆の CHAIN 2 では出ない`);
+
+    // 演出中の RETRY / ステージ変更で即時に消える
+    for (const [label, act] of [
+      ['RETRY', () => ap.evaluate(() => window.__blast.retry())],
+      ['ステージ変更', () => ap.evaluate(() => window.__blast.goStage(12))],
+    ]) {
+      await ap.evaluate(() => window.__blast.goStage(10));
+      await ap.waitForTimeout(350);
+      await ap.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
+      await ap.waitForTimeout(400);
+      await dragOn(ap, 0, 7, 2);
+      await ap.waitForTimeout(280);
+      const mid = await ap.evaluate(ATK);
+      await act();
+      const now = await ap.evaluate(() => document.getElementById('attackFigure').classList.contains('on'));
+      if (!mid.on) ng.push(`${tag}: ${label} 検査の前提（attack 表示中）が成立していない`);
+      else if (now) ng.push(`${tag}: ${label} で attack が即時に消えない`);
+      else note.push(`  ${tag}: ${label} で attack が即時に消える`);
+    }
+    await actx.close();
+  }
+}
+
 if (errs.length) ng.push(`操作中に エラー ${errs.length} 件 — ${errs[0]}`);
 
 await browser.close();

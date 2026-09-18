@@ -78,7 +78,16 @@ export interface SpecialInstance {
 /** 起爆1回分の記録（combo の場合は group に2個以上入る）。 */
 export interface Detonation {
   readonly group: readonly SpecialInstance[];
-  /** 適用した効果の名前。combo 判定のデバッグ用。 */
+  /**
+   * 適用した効果の名前。**COMBO 判定の唯一の正本**（2B 3-16 ／ 7-5-9 の 4）。
+   *
+   * 単独起爆なら `'rocket'` / `'bomb'` / `'rainbow'` / `'none'`、
+   * 特殊 x 特殊 なら `src/data/combos.ts` の `COMBO_NAMES` のキーになる。
+   * 判定は必ず `isComboEffect(effect)` を通すこと。
+   * **表示文字列（`comboName()` の戻り値）や `group.length` で判定し直さない。**
+   * `isComboEffect(effect)` と `group.length >= 2` が一致することは
+   * `tests/attack.test.ts` で押さえてある（`detonate()` の分岐がそう作られている）。
+   */
   readonly effect: string;
   readonly cells: readonly number[];
 }
