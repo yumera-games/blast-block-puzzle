@@ -25,6 +25,9 @@ const URL = process.argv[2] || 'http://localhost:5183/';
  *  `skipTitle=1` はタイトルを飛ばす開発用の入口（通常起動には無い）。 */
 const DEV_URL = URL + (URL.includes('?') ? '&' : '?') + 'debug=1&skipTitle=1';
 const ng = [];
+/** 画面写真の出力先。**人間が見るための材料**で、合否の根拠にはしない。 */
+const SHOT_DIR = 'tools/out';
+mkdirSync(SHOT_DIR, { recursive: true });
 const note = [];
 const browser = await launch();
 
@@ -795,7 +798,7 @@ await page.screenshot({ path: 'tools/out/stage01.png' });
   const offAfter = await pp.evaluate(() => window.__osc);
   if (offState.sound !== false || offState.pressed !== 'false') ng.push('音: OFF へ切り替わっていない');
   else if (offAfter - offBefore !== 0) ng.push(`音: OFF なのに ${offAfter - offBefore} 音鳴った`);
-  else note.push('  音: OFF では 5 種類とも鳴らない（aria-pressed も false）');
+  else note.push('  音: OFF では 7 種類とも鳴らない（aria-pressed も false）');
   await pctx.close();
 
   // ?debug=1 では開発用が使える
@@ -841,6 +844,217 @@ await page.screenshot({ path: 'tools/out/stage01.png' });
     ng.push(`reduced-motion: attack に運動が付いている ${JSON.stringify(rm)}`);
   else note.push(`  reduced-motion: attack は同じ静止表示（${rm.w}x${rm.h} / animation なし / transform なし）`);
   await rctx.close();
+}
+
+/* ⑪ エンドレス・記録・失敗画面のネイ・背景（工程 W-3）。
+   エンドレスは**全ステージクリアでだけ**開く（進行データの cleared だけで決める）。
+   検証用に `?debug=1` からも始められるようにしてあるので、実際に最後まで遊んで
+   「置けなくなったら終わる」「記録が残る」「進行データを汚さない」を見る。 */
+{
+  /** 置ける手をひとつ探す。`noLine` なら**ラインも起爆も起きない手**だけを選ぶ。 */
+  const findMove = (page, noLine) =>
+    page.evaluate((nl) => {
+      const B = window.__blast;
+      const st = B.state();
+      for (let i = 0; i < st.tray.length; i++) {
+        if (!st.tray[i]) continue;
+        for (let row = 0; row < 8; row++)
+          for (let col = 0; col < 8; col++) {
+            if (!B.place(i, row, col)) continue;
+            if (nl) {
+              const pv = B.preview(i, row, col);
+              if (!pv || pv.lines > 0 || pv.detonations > 0) continue;
+            }
+            return { i, row, col };
+          }
+      }
+      return null;
+    }, noLine);
+
+  const settle = (page) =>
+    page
+      .waitForFunction(
+        () => {
+          const s = window.__blast.state();
+          return !s.busy && !s.awaitingTeach;
+        },
+        null,
+        { timeout: 8000 },
+      )
+      .catch(() => undefined);
+
+  /** 終わるまで（または上限まで）遊ぶ。**実際のドラッグ操作で進める。** */
+  const playOut = async (page, { noLine = false, max = 300 } = {}) => {
+    let moves = 0;
+    for (; moves < max; moves++) {
+      const st = await page.evaluate(() => window.__blast.state());
+      if (st.status !== 'playing') break;
+      const m = await findMove(page, noLine);
+      if (!m) break;
+      await dragOn(page, m.i, m.row, m.col);
+      await settle(page);
+    }
+    return moves;
+  };
+
+  const dismissCard = (page) =>
+    page.evaluate(() => {
+      const b = document.querySelector('#overlayCard button[data-i]');
+      if (b) b.click();
+    });
+
+  // --- エンドレスは全ステージクリアまで開かない
+  const lctx = await browser.newContext({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 2 });
+  const lp = await lctx.newPage();
+  await lp.goto(URL, { waitUntil: 'networkidle' });
+  await lp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  const locked = await lp.evaluate(() => [...document.querySelectorAll('#overlayCard .btn')].map((b) => b.textContent));
+  if (locked.some((t) => t && t.startsWith('エンドレス')))
+    ng.push(`エンドレス: 未クリアなのにタイトルに出ている ${JSON.stringify(locked)}`);
+  else note.push('  エンドレス: 全ステージクリアまでタイトルに出ない');
+  await lctx.close();
+
+  // --- 背景は CSS だけの静止画（4 幅とも同じ指定で、動きを持たない）
+  for (const [w, h] of SIZES) {
+    const bctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2 });
+    const bp = await bctx.newPage();
+    await bp.goto(URL, { waitUntil: 'networkidle' });
+    await bp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+    const bg = await bp.evaluate(() => {
+      const cs = getComputedStyle(document.body);
+      return {
+        image: cs.backgroundImage,
+        anim: cs.animationName,
+        trans: cs.transitionProperty,
+        attach: cs.backgroundAttachment,
+      };
+    });
+    const grads = (bg.image.match(/gradient/g) || []).length;
+    if (grads < 3) ng.push(`${w}x${h}: 背景のグラデーションが ${grads} 本しかない`);
+    else if (bg.anim !== 'none') ng.push(`${w}x${h}: 背景に animation が付いている（静止のはず）`);
+    else if (grads === 3 && w === 430) note.push(`  背景: CSS だけの静止画（勾配 3 本 / animation なし / ${bg.attach}）`);
+    await bctx.close();
+  }
+
+  // --- 失敗画面にネイが出る（工程 W-3 の D）。**375px 未満では出さない**（2B 4-16）。
+  for (const [w, h] of SIZES) {
+    const fctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2 });
+    const fp = await fctx.newPage();
+    await fp.goto(DEV_URL, { waitUntil: 'networkidle' });
+    await fp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+    await fp.evaluate(() => window.__blast.goStage(1));
+    await fp.waitForTimeout(400);
+    await dismissCard(fp);
+    await fp.waitForTimeout(300);
+    // ラインを消さない手だけを選べば、5 手で MOVES が尽きて失敗する。
+    await playOut(fp, { noLine: true, max: 12 });
+    await fp.waitForTimeout(700);
+    const failed = await fp.evaluate(() => ({
+      status: window.__blast.state().status,
+      h2: document.querySelector('#overlayCard h2')?.textContent ?? '',
+      figs: document.querySelectorAll('#overlayCard .figStack img').length,
+      figH: Math.round(document.querySelector('#overlayCard .figStack')?.getBoundingClientRect().height ?? 0),
+      top: Math.round(document.getElementById('overlayCard').getBoundingClientRect().top),
+      bottom: Math.round(document.getElementById('overlayCard').getBoundingClientRect().bottom),
+      inner: window.innerHeight,
+      retry: [...document.querySelectorAll('#overlayCard .btn')].map((b) => b.textContent),
+    }));
+    const wantFig = w >= 375;
+    if (failed.status !== 'failed') ng.push(`${w}x${h} 失敗画面: 失敗させられなかった（status=${failed.status}）`);
+    else if (failed.h2 !== 'FAILED') ng.push(`${w}x${h} 失敗画面: 見出しが "${failed.h2}"`);
+    else if (wantFig && failed.figs === 0) ng.push(`${w}x${h} 失敗画面: ネイが出ていない`);
+    else if (!wantFig && failed.figs > 0) ng.push(`${w}x${h} 失敗画面: 375px 未満なのにネイが出ている`);
+    else if (!failed.retry.includes('RETRY')) ng.push(`${w}x${h} 失敗画面: RETRY が無い`);
+    else if (failed.top < -1 || failed.bottom > failed.inner + 2)
+      ng.push(`${w}x${h} 失敗画面: カードが画面からはみ出す（${failed.top}〜${failed.bottom} / ${failed.inner}）`);
+    else
+      note.push(
+        `  ${w}x${h} 失敗画面: FAILED（ネイ ${failed.figs} 枚 / 高さ ${failed.figH}px / カード ${failed.top}〜${failed.bottom} ≦ ${failed.inner}）`,
+      );
+    await fp.screenshot({ path: `${SHOT_DIR}/w3-failed-${w}x${h}.png` });
+    await fctx.close();
+  }
+
+  // --- エンドレスを最後まで遊ぶ
+  const ectx = await browser.newContext({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 2 });
+  const ep = await ectx.newPage();
+  await ep.goto(DEV_URL, { waitUntil: 'networkidle' });
+  await ep.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  const beforeRun = await ep.evaluate(() => ({
+    progress: localStorage.getItem('blast-block:progress'),
+    settings: localStorage.getItem('blast-block:settings'),
+    stats: window.__blast.stats(),
+  }));
+  await ep.evaluate(() => window.__blast.goEndless());
+  await ep.waitForTimeout(400);
+  await dismissCard(ep);
+  await ep.waitForTimeout(300);
+  const started = await ep.evaluate(() => ({
+    endless: window.__blast.progress().endless,
+    stage: window.__blast.state().stage,
+    objectives: window.__blast.state().objectives.length,
+    hudStage: document.getElementById('hudStage').textContent,
+    hudK: document.querySelector('#movesBox .k').textContent,
+    hudV: document.getElementById('hudMoves').textContent,
+  }));
+  if (!started.endless) ng.push('エンドレス: 開始できていない');
+  else if (started.objectives !== 0) ng.push(`エンドレス: 目的が ${started.objectives} 件ある`);
+  else if (started.hudK !== 'TURNS') ng.push(`エンドレス: HUD が "${started.hudK}" のまま`);
+  else note.push(`  エンドレス: HUD は "${started.hudStage}" ／ ${started.hudK} ${started.hudV}`);
+  await ep.screenshot({ path: `${SHOT_DIR}/w3-endless-393x852.png` });
+
+  const played = await playOut(ep, { max: 300 });
+  await ep.waitForTimeout(900);
+  const over = await ep.evaluate(() => ({
+    status: window.__blast.state().status,
+    score: window.__blast.state().score,
+    turns: window.__blast.scene.stageState.movesUsed,
+    h2: document.querySelector('#overlayCard h2')?.textContent ?? '',
+    rows: [...document.querySelectorAll('#overlayCard .statRow')].map(
+      (r) => `${r.querySelector('.k').textContent}=${r.querySelector('.v').textContent}`,
+    ),
+    record: !!document.querySelector('#overlayCard .record'),
+    btns: [...document.querySelectorAll('#overlayCard .btn')].map((b) => b.textContent),
+    sound: !!document.getElementById('btnSound'),
+    stats: window.__blast.stats(),
+    progress: localStorage.getItem('blast-block:progress'),
+    settings: localStorage.getItem('blast-block:settings'),
+  }));
+  if (over.status !== 'failed') ng.push(`エンドレス: ${played} 手で終わらなかった（status=${over.status}）`);
+  else if (over.h2 !== 'ゲームオーバー') ng.push(`エンドレス: 見出しが "${over.h2}"`);
+  else if (over.rows.length !== 5) ng.push(`エンドレス: 記録欄が ${over.rows.length} 行（5 行のはず）`);
+  else if (!over.record) ng.push('エンドレス: 初回なのにハイスコア更新が出ない');
+  else if (!over.sound) ng.push('エンドレス: ゲームオーバー画面に音 ON/OFF が無い');
+  else if (!over.btns.includes('もういちど') || !over.btns.includes('タイトルへ'))
+    ng.push(`エンドレス: ボタンが ${JSON.stringify(over.btns)}`);
+  else if (over.stats.endlessRuns !== beforeRun.stats.endlessRuns + 1)
+    ng.push(`エンドレス: 回数が ${over.stats.endlessRuns}（+1 のはず）`);
+  else if (over.stats.endlessBest !== over.score)
+    ng.push(`エンドレス: ハイスコアが ${over.stats.endlessBest}（SCORE ${over.score} のはず）`);
+  else if (over.progress !== beforeRun.progress) ng.push('エンドレス: 進行データが書き換わった');
+  else if (over.settings !== beforeRun.settings) ng.push('エンドレス: 音設定が書き換わった');
+  else
+    note.push(
+      `  エンドレス: ${over.turns} 手 / SCORE ${over.score} で詰みになり、記録が残る（${over.rows.join(' ')}）`,
+    );
+  await ep.screenshot({ path: `${SHOT_DIR}/w3-endless-over-393x852.png` });
+
+  // もう一度：新しい seed で仕切り直し、回数は増えない（遊び終えたときだけ数える）
+  await ep.evaluate(() => {
+    const b = [...document.querySelectorAll('#overlayCard .btn')].find((x) => x.textContent === 'もういちど');
+    if (b) b.click();
+  });
+  await ep.waitForTimeout(600);
+  const again = await ep.evaluate(() => ({
+    status: window.__blast.state().status,
+    turns: window.__blast.scene.stageState.movesUsed,
+    seed: window.__blast.scene.stageState.seed,
+    runs: window.__blast.stats().endlessRuns,
+  }));
+  if (again.status !== 'playing' || again.turns !== 0) ng.push('エンドレス: 「もういちど」で最初から始まらない');
+  else if (again.runs !== over.stats.endlessRuns) ng.push('エンドレス: 始めただけで回数が増えた');
+  else note.push(`  エンドレス: 「もういちど」は新しい seed(${again.seed}) で 0 手から始まる`);
+  await ectx.close();
 }
 
 if (errs.length) ng.push(`操作中に エラー ${errs.length} 件 — ${errs[0]}`);

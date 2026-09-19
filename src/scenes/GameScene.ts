@@ -2,13 +2,14 @@ import Phaser from 'phaser';
 import { Board } from '../game/Board';
 import { StageState, type Presentation } from '../game/StageState';
 import { stageById } from '../data/stages';
-import type { TutorialHint } from '../data/stages';
+import type { StageDef, TutorialHint } from '../data/stages';
 import type { Cell, Piece, ResolutionEvent, ResolutionResult } from '../game/types';
 import { comboPreviewLabel } from '../data/combos';
 import { type ComboLink, TEACH_PROMPT, type TeachKind, comboLinkOf, waveMark, waveNotice } from '../data/resultText';
 import { type AttackPlacement, attackEndMs, attackPlacement, hasCombo } from '../game/attack';
 import { arrowEndpoints, cellCenter } from '../ui/teachDraw';
 import { previewPlacement, type PreviewResult } from '../game/Preview';
+import { playsSoloDetonation } from '../audio/sfx';
 import { CELL_COLOR, CELL_DEEP, CELL_EDGE, UI } from '../ui/colors';
 import { PieceTray } from '../ui/PieceTray';
 import type { Layout } from '../ui/layout';
@@ -42,7 +43,7 @@ export interface SceneHooks {
   /** ネイの attack 表示。`null` で消す。**表示の責務はここ 1 か所だけ**（2B 7-5-9）。 */
   onAttack?(placement: AttackPlacement | null): void;
   /** 効果音。**鳴らす判断はシーン側、鳴らし方は main.ts の Sfx。** */
-  onSfx?(name: 'place' | 'line' | 'combo'): void;
+  onSfx?(name: 'place' | 'line' | 'special' | 'detonate' | 'combo'): void;
 }
 
 interface FadingCell {
@@ -173,9 +174,17 @@ export class GameScene extends Phaser.Scene {
   // ------------------------------------------------------------------- stage
 
   loadStage(id: number): void {
+    this.loadStageDef(stageById(id));
+  }
+
+  /**
+   * ステージ定義を直接読み込む。**エンドレス（`STAGES` に無い定義）の入口。**
+   * 番号から引く `loadStage()` もここを通るので、開始処理は 1 か所だけ。
+   */
+  loadStageDef(def: StageDef): void {
     // 前のステージの演出タイマーを、新しい StageState を作る**前に**捨てる。
     this.clearResolutionSchedule();
-    this.state = new StageState(stageById(id));
+    this.state = new StageState(def);
     this.view = this.state.board.clone();
     this.teach = this.state.def.tutorial.teach ?? [];
     this.teachHeld = false;
@@ -543,6 +552,11 @@ export class GameScene extends Phaser.Scene {
         // 消える見た目と同じ時点で鳴らす。**ラインが完成するのは波 1 だけ**なので
         // （重力が無く、波 2 以降で新しいラインは揃わない）自然に 1 手 1 回になる。
         if (ev.lines.length > 0) this.hooks.onSfx?.('line');
+        // 特殊が 1 個だけ起爆した合図（工程 W-3）。**COMBO の手では鳴らさない。**
+        // 判定は上の `attack`（1 手 1 回の COMBO 判定）をそのまま使う。
+        // 波ごとに数え直さないので、「波 1 は単独・波 2 で COMBO」の手でも
+        // 単独音は鳴らず、COMBO 音だけが残る。
+        if (playsSoloDetonation(ev.detonations.length, attack)) this.hooks.onSfx?.('detonate');
         // **同じ delay へ 2 本積むと実行順が決まらない。**波 1 の callback の中から
         // 呼んで、コード上で順序を一意にする（2B 7-5-9 の 3）。
         if (first && attack) {
@@ -551,7 +565,12 @@ export class GameScene extends Phaser.Scene {
           this.hooks.onSfx?.('combo');
         }
       });
-      this.scheduleResolution(at + TIMING.lineHighlight, () => this.applyEvent(ev));
+      this.scheduleResolution(at + TIMING.lineHighlight, () => {
+        this.applyEvent(ev);
+        // 特殊が生まれた合図（工程 W-3）。**盤面に現れるのと同じ時点**で鳴らす。
+        // 1 波に生まれる特殊は 1 個までなので、1 波 1 回で足りる。
+        if (ev.spawned) this.hooks.onSfx?.('special');
+      });
       t = at + TIMING.lineHighlight + TIMING.removeFade + TIMING.betweenChains;
     }
     // 終了は**波 2 に依存させない。**490ms で独立して消える（2B 7-5-9 の 3）。

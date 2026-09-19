@@ -179,6 +179,9 @@ export class StageState {
   }
 
   isCleared(): boolean {
+    // エンドレスは目的を持たない。**目的 0 件を「全部達成」と読まない。**
+    // （`[].every()` は true なので、この 1 行が無いと開始直後にクリアしてしまう。）
+    if (this.def.endless) return false;
     return this.objectiveProgress().every((p) => p.done);
   }
 
@@ -194,6 +197,8 @@ export class StageState {
       this.status = 'cleared';
       return;
     }
+    // エンドレスの `moves` は実質無限なので、ここで落ちるのは `isStuck()` だけ。
+    // 判定はこの 1 か所だけ。**同じ合法手判定を別に複製しない。**
     if (this.moves <= 0 || this.isStuck()) {
       this.status = 'failed';
     }

@@ -1,6 +1,6 @@
 /* Phase 1 Gray Box。**アートは作らない。** 情報が読めることだけを目的にする。 */
 :root {
-  --bg: #14161c;
+  --bg: #0b0d18;
   --panel: #1e222b;
   --panel-2: #272c37;
   --line: #39404f;
@@ -12,12 +12,25 @@
   --warn: #ffd166;
   --hud-h: 92px;
   --ctrl-h: 44px;
+  /* 背景（工程 W-3）。**静止。**上から順に：左上の青い光 → 右下の紫の光 → 地の勾配。 */
+  --bg-image:
+    radial-gradient(58% 38% at 16% 10%, rgba(86, 118, 214, .20) 0%, rgba(86, 118, 214, 0) 70%),
+    radial-gradient(66% 44% at 86% 82%, rgba(146, 88, 198, .22) 0%, rgba(146, 88, 198, 0) 72%),
+    linear-gradient(172deg, #111838 0%, #0d1024 44%, #140c20 100%);
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; margin: 0; }
+/* 画面全体の背景（工程 W-3）。**CSS だけで描く静止画。**
+   画像ファイルも canvas 描画も使わず、アニメーションも持たない。
+   濃紺（上）から黒紫（下）へ落とし、左上に青・右下に紫のごく薄い光を置く。
+   盤面・トレイ・HUD はそれぞれ自前の面を持っているので、**可読性は変わらない**
+   （Block Blast の長所＝盤面の可読性を演出で損なわない。CLAUDE.md 3）。
+   タイトルの幕も同じ値を使う。背景が 2 種類に割れないようにする。 */
 body {
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: var(--bg-image);
+  background-attachment: fixed;
   color: var(--text);
   font: 500 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans JP", monospace;
   -webkit-text-size-adjust: 100%;
@@ -102,7 +115,26 @@ button.btn.narrow { flex: 0 0 64px; }
 #overlay h2.ng { color: var(--ng); }
 #overlay p { margin: 6px 0; font-size: 13px; color: var(--muted); white-space: pre-wrap; text-align: left; }
 #overlay .stats { font-size: 12px; color: var(--muted); margin: 10px 0; }
-#overlay .btns { display: flex; gap: 6px; margin-top: 12px; }
+#overlay .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+/* 行いっぱいに広げるボタン。3 個以上並ぶカードで、320px でも文字を潰さない。 */
+#overlay .btns .btn.wide { flex: 1 0 100%; }
+
+/* 結果の数字（工程 W-3）。**1 行 1 項目。**左に項目名、右に数字。
+   1 行の文字列だと項目が増えたとき 320px で折り返して読み取りにくくなる。 */
+#overlay .statList { margin: 10px 0 0; display: flex; flex-direction: column; gap: 2px; }
+#overlay .statRow { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+#overlay .statRow .k { color: var(--muted); letter-spacing: .06em; }
+#overlay .statRow .v { font-variant-numeric: tabular-nums; }
+/* ハイスコア更新。**点滅させない。**色と枠だけで示す。 */
+#overlay .record {
+  margin: 10px 0 0;
+  padding: 5px 8px;
+  border: 1px solid #e8a51f;
+  border-radius: 8px;
+  color: #e8a51f;
+  font-size: 13px;
+  letter-spacing: .08em;
+}
 
 /* 失敗 A（2B 3-16-4 / 3-16-4-1）。**盤面 canvas の表示領域だけ**を覆う暗転。
    位置と寸法は main.ts が layout から計算して付ける。入力は素通りさせる。
@@ -350,12 +382,23 @@ button.btn.narrow { flex: 0 0 64px; }
 /* タイトル画面（工程 W-2）。**幕を不透明にして、後ろの盤面を見せない。**
    人物は勝利カード用のネイをそのまま使う（新規画像は作らない）。
    320px 幅でも縦に収まるよう、タイトルでだけ人物を小さく出す。 */
-#overlay.titleScreen { background: var(--bg); }
+#overlay.titleScreen { background-color: var(--bg); background-image: var(--bg-image); }
 #overlay .card.title { background: var(--panel); border-color: var(--line); }
 #overlay .card.title h2 { font-size: 22px; letter-spacing: .14em; }
 #overlay .card.title p { text-align: center; }
 #overlay .card.title .figStack { width: 106px; height: 251px; }
 #overlay .card.title .figStack img { width: 106px; height: 251px; }
+
+/* 失敗カードのネイ（工程 W-3）。**勝利カードと同じ画像を、タイトルと同じ縮尺で出す。**
+   FAILED は理由・SCORE・RETRY を必ず見せる画面なので、375x667 でもカードが
+   縦に溢れないよう 106x251 にする（タイトル画面と同じ値。新しい寸法を作らない）。
+   呼吸と talk の動きは `.card.win` にだけ当たっているので、ここでは静止で出る。
+   人物は装飾で、**失敗の理由は文字だけで読める**（2B 4-1 / 4-10-1）。 */
+#overlay .card.failed .figStack { width: 106px; height: 251px; }
+#overlay .card.failed .figStack img { width: 106px; height: 251px; }
+#overlay .card.failed .statRow .k { color: #6b5f6f; }
+#overlay .card.failed .statRow .v { color: #29182b; }
+#overlay .card.failed .record { border-color: #a0180e; color: #a0180e; }
 
 /* 音 ON / OFF。**押してもカードは閉じない。**ON と OFF で幅を変えないので
    レイアウトが動かない。タップ領域は 44px 以上。 */

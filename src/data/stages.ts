@@ -68,6 +68,12 @@ export interface StageDef {
   /** 固定 seed。同じ seed なら同じ候補列が再現される。 */
   readonly seed: number;
   readonly moves: number;
+  /**
+   * エンドレス（工程 W-3）。**目的も手数制限も持たない**ステージであることを表す。
+   * ゲームロジックに stage 番号の if 文を書かないため、旗はここ（データ側）に置く。
+   * `STAGES` の中では使わない。`src/game/endless.ts` が作る定義だけが true を持つ。
+   */
+  readonly endless?: boolean;
   /** 初期盤面。Board.fromStrings と同じ記法（. R B Y G P > ^ * @）。 */
   readonly initialBoard?: readonly string[];
   /** 最初の数セットを固定する。テスト再現性のため。使い切ったら seed 乱数へ移る。 */

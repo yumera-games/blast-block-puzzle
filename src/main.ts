@@ -5,10 +5,13 @@ import { TutorialOverlay } from './ui/TutorialOverlay';
 import type { AttackPlacement } from './game/attack';
 import { isUnlocked, loadProgress, saveProgress, withCleared, withCurrent } from './game/progress';
 import { loadSettings, saveSettings } from './game/settings';
+import { ENDLESS_ID, createEndlessStage, newEndlessSeed } from './game/endless';
+import { loadStats, saveStats, withAllClear, withEndlessRun } from './game/stats';
 import { Sfx, createWebAudioBackend } from './audio/sfx';
 import { DebugPanel } from './ui/DebugPanel';
 import { PlayMetrics } from './ui/PlayMetrics';
 import { computeLayout, type Layout } from './ui/layout';
+import { previewPlacement } from './game/Preview';
 import { FIRST_STAGE, LAST_STAGE, STAGES } from './data/stages';
 import type { StageState } from './game/StageState';
 
@@ -35,6 +38,12 @@ const overlayCard = $('overlayCard');
 /** 保存された進行。**壊れていても既定値で起動する**（progress.ts）。 */
 let progress = loadProgress();
 let currentStage = progress.current;
+
+/** プレイ記録（工程 W-3）。**進行データとも音設定とも別のキー**（stats.ts）。 */
+let stats = loadStats();
+
+/** いまエンドレスを遊んでいるか。**進行データには一切書かない。** */
+let endlessMode = false;
 
 /** 音の設定。**進行データとは別のキー**（settings.ts）。 */
 let settings = loadSettings();
@@ -89,10 +98,18 @@ const hooks: SceneHooks = {
     preloadFigure();
     preloadAttack();
     const intro = tutorial.takeIntro(state.def);
-    if (intro) showCard({ title: `STAGE ${state.def.id}`, body: intro, buttons: [{ label: 'START', primary: true }] });
+    // エンドレスはステージ番号を持たないので、見出しに番号を出さない。
+    const title = state.def.endless ? state.def.name : `STAGE ${state.def.id}`;
+    if (intro) showCard({ title, body: intro, buttons: [{ label: 'START', primary: true }] });
     else hideCard();
   },
   onStageEnd(state) {
+    // エンドレスは進行データを一切動かさない。終わりは「置けなくなったとき」だけ。
+    if (endlessMode) {
+      sfx.play('fail');
+      endEndlessRun(state);
+      return;
+    }
     // クリアしたら進行を進める。**失敗では進めない。**演出の途中経過は保存しない。
     if (state.status === 'cleared') {
       progress = withCleared(progress, state.def.id);
@@ -124,7 +141,10 @@ const game = new Phaser.Game({
   parent: 'game',
   width: layout.width,
   height: layout.height,
-  backgroundColor: '#14161c',
+  // **canvas を塗りつぶさない**（工程 W-3）。盤面・トレイはそれぞれ自前の面を描くので、
+  // 残るのは盤面の外側の余白だけになり、そこへ CSS の静的背景がそのまま見える。
+  // 背景を canvas 側にも描くと二重管理になるため、**背景は CSS の 1 か所だけ**にする。
+  transparent: true,
   scene: scene,
   scale: { mode: Phaser.Scale.NONE, zoom: 1 / layout.dpr },
   banner: false,
@@ -414,6 +434,8 @@ function placeBoardDim(): void {
 interface CardButton {
   readonly label: string;
   readonly primary?: boolean;
+  /** 行いっぱいに広げる。ボタンが 3 個以上になるカードで、320px でも文字を潰さない。 */
+  readonly wide?: boolean;
   readonly onClick?: () => void;
 }
 
@@ -455,7 +477,11 @@ function showCard(opts: {
     (opts.stats ? `<div class="stats">${escapeHtml(opts.stats)}</div>` : '') +
     (opts.extraHtml ?? '') +
     `<div class="btns">${opts.buttons
-      .map((b, i) => `<button class="btn${b.primary ? ' primary' : ''}" data-i="${i}">${escapeHtml(b.label)}</button>`)
+      .map(
+        (b, i) =>
+          `<button class="btn${b.primary ? ' primary' : ''}${b.wide ? ' wide' : ''}" data-i="${i}">` +
+          `${escapeHtml(b.label)}</button>`,
+      )
       .join('')}</div>`;
   watchFigure();
   // **`data-i` を持つボタンだけ**を結線する。音トグルはカードを閉じない。
@@ -535,6 +561,45 @@ function bindSoundToggle(): void {
 }
 
 /**
+ * 結果の数字の並び。**1 行 1 項目**にして、左に項目名・右に数字で読ませる。
+ * 既存の `stats` 欄は 1 行の文字列なので、項目が増えると 320px で折り返して読みにくい。
+ */
+function statListHtml(rows: readonly (readonly [string, string])[]): string {
+  return (
+    '<div class="statList">' +
+    rows
+      .map(([k, v]) => `<div class="statRow"><span class="k">${escapeHtml(k)}</span>` +
+        `<span class="v">${escapeHtml(v)}</span></div>`)
+      .join('') +
+    '</div>'
+  );
+}
+
+/**
+ * エンドレスを遊べるか。**全ステージをクリアしたときだけ**開く。
+ * 解放用の旗は作らない。進行データの `cleared` だけで決める（別の保存値を増やさない）。
+ */
+function endlessUnlocked(): boolean {
+  return progress.cleared >= LAST_STAGE;
+}
+
+/** タイトル・ステージ選択・全クリアに出すエンドレスの入口。開発時は常に出す。 */
+function endlessButton(): CardButton[] {
+  if (!endlessUnlocked() && !devMode) return [];
+  const best = stats.endlessBest;
+  return [
+    {
+      label: best > 0 ? `エンドレス（さいこう ${best}）` : 'エンドレス',
+      wide: true,
+      onClick: () => {
+        sfx.unlock();
+        goEndless();
+      },
+    },
+  ];
+}
+
+/**
  * タイトル画面。**ページを開いた直後に盤面を見せない。**
  * 既存の結果カードと同じ仕組みを使い、幕だけ不透明にする。
  * 人物は**勝利カード用のネイをそのまま再利用**する（新規画像を作らない）。
@@ -559,8 +624,9 @@ function showTitle(): void {
       ? [
           { label: 'ステージをえらぶ', onClick: () => { sfx.unlock(); showStageSelect(); } },
           { label: 'つづきから', primary: true, onClick: start },
+          ...endlessButton(),
         ]
-      : [{ label: 'はじめる', primary: true, onClick: start }],
+      : [{ label: 'はじめる', primary: true, onClick: start }, ...endlessButton()],
   });
   bindSoundToggle();
 }
@@ -572,11 +638,14 @@ function showStageSelect(): void {
     title: 'ステージをえらぶ',
     body: devMode ? undefined : `クリアすると つぎの ステージが ひらきます（いま ${open} まで）`,
     extraHtml: soundToggleHtml(),
-    buttons: STAGES.filter((st) => devMode || isUnlocked(progress, st.id)).map((st) => ({
-      label: `${st.id}`,
-      primary: st.id === currentStage,
-      onClick: () => goStage(st.id),
-    })),
+    buttons: [
+      ...STAGES.filter((st) => devMode || isUnlocked(progress, st.id)).map((st) => ({
+        label: `${st.id}`,
+        primary: st.id === currentStage && !endlessMode,
+        onClick: () => goStage(st.id),
+      })),
+      ...endlessButton(),
+    ],
   });
   bindSoundToggle();
 }
@@ -586,17 +655,24 @@ function showStageSelect(): void {
  * 「もう一度あそぶ」は Stage 1 を開くだけで、クリア済みの記録はそのまま残る。
  */
 function showAllClear(state: StageState): void {
+  // 全クリアの回数を記録する。**進行データ（どこまで開いたか）は動かさない。**
+  stats = withAllClear(stats);
+  saveStats(stats);
+  const times = stats.allClearCount;
   showCard({
     title: 'ぜんステージ クリア',
     titleClass: 'ok',
     cardClass: 'win',
     figure: true,
-    body: `ぜん ${LAST_STAGE} ステージを クリアしました。\nさいごの ステージ ${state.def.id} も とっぱです。`,
+    body:
+      `ぜん ${LAST_STAGE} ステージを クリアしました。\nさいごの ステージ ${state.def.id} も とっぱです。` +
+      (times > 1 ? `\nぜんクリア ${times} 回目。` : '\nエンドレスが あそべるように なりました。'),
     stats: `SCORE ${state.score}   MOVES USED ${state.movesUsed}   MAX CHAIN ${state.maxChain}`,
     extraHtml: soundToggleHtml(),
     buttons: [
       { label: 'ステージをえらぶ', onClick: () => showStageSelect() },
       { label: 'もう一度あそぶ', primary: true, onClick: () => goStage(FIRST_STAGE) },
+      ...endlessButton(),
     ],
   });
   bindSoundToggle();
@@ -646,16 +722,34 @@ function showClear(state: StageState): void {
  */
 function showFailed(state: StageState): void {
   const reason = state.moves <= 0 ? 'MOVES がなくなりました' : 'どの候補も置けません';
-  const card = (): void =>
+  presentFailCard(() =>
     showCard({
       title: 'FAILED',
       titleClass: 'ng',
       cardClass: 'failed',
+      // ネイは失敗画面にも出す（工程 W-3）。**勝利カード用の既存画像をそのまま使い、
+      // 新しい画像も切り抜きも作らない。**呼吸と talk は勝利カードだけなので、
+      // ここでは静止のまま出る（CSS の対象が `.card.win` に限定されている）。
+      figure: true,
       body: reason,
       stats: `SCORE ${state.score}`,
       buttons: [{ label: 'RETRY', primary: true, onClick: () => retryStage() }],
-    });
+    }),
+  );
+}
 
+/**
+ * 失敗 A の時間割（3-16-4-1）。**カードの中身だけを差し替えて使い回す。**
+ * 通常ステージの FAILED とエンドレスのゲームオーバーで、暗転とカードの間合いを揃える。
+ *
+ *   0〜90ms   失敗確定（すでに済んでいる）
+ *   90ms      盤面暗転の開始 → 120ms linear
+ *   210ms     結果カードの表示開始 → 200ms
+ *   410ms     完了
+ *
+ * `prefers-reduced-motion: reduce` では待たせず、暗転の最終状態とカードを即時出す。
+ */
+function presentFailCard(card: () => void): void {
   // 連続して呼ばれても重ねない（3-16-4-1 の 10）。
   clearFailEffect();
   placeBoardDim();
@@ -669,12 +763,72 @@ function showFailed(state: StageState): void {
   failTimers.push(window.setTimeout(card, 210));
 }
 
+/* ------------------------------------------------------- エンドレス（W-3） */
+
+/**
+ * エンドレスを 1 回始める。**毎回ちがう seed** なので同じ並びは繰り返さない。
+ * 進行データ（`current` / `cleared`）には書かない。ステージ選択の状態も変えない。
+ */
+function goEndless(): void {
+  endlessMode = true;
+  clearFailEffect();
+  metrics.begin(ENDLESS_ID, false);
+  scene.loadStageDef(createEndlessStage(newEndlessSeed()));
+}
+
+/**
+ * エンドレスが終わったとき（どの候補も置けなくなったとき）。
+ * **記録はここで 1 回だけ更新する。**途中でタイトルやステージへ戻った回は数えない。
+ */
+function endEndlessRun(state: StageState): void {
+  const { stats: next, record } = withEndlessRun(stats, state.score);
+  stats = next;
+  saveStats(stats);
+  presentFailCard(() => {
+    showCard({
+      title: 'ゲームオーバー',
+      titleClass: 'ng',
+      cardClass: 'failed',
+      body: 'おけるところが なくなりました。',
+      extraHtml:
+        (record ? '<div class="record">ハイスコア こうしん！</div>' : '') +
+        statListHtml([
+          ['SCORE', String(state.score)],
+          ['HIGH SCORE', String(stats.endlessBest)],
+          ['TURNS', String(state.movesUsed)],
+          ['MAX CHAIN', String(state.maxChain)],
+          ['PLAYED', `${stats.endlessRuns} 回`],
+        ]) +
+        soundToggleHtml(),
+      buttons: [
+        { label: 'タイトルへ', onClick: () => goTitle() },
+        { label: 'もういちど', primary: true, onClick: () => goEndless() },
+      ],
+    });
+    // カードを組み立てた直後に結線する。**表示の経路（即時／210ms 後）は問わない。**
+    bindSoundToggle();
+  });
+}
+
+/** エンドレスを終えてタイトルへ戻る。進行データは読むだけで、書き換えない。 */
+function goTitle(): void {
+  endlessMode = false;
+  clearFailEffect();
+  showTitle();
+}
+
 function retryStage(): void {
+  // エンドレスの「もう一度」は**新しい seed で仕切り直す**。同じ並びを繰り返さない。
+  if (endlessMode) {
+    goEndless();
+    return;
+  }
   metrics.begin(currentStage, true);
   scene.retry();
 }
 
 function goStage(id: number): void {
+  endlessMode = false;
   currentStage = Math.max(FIRST_STAGE, Math.min(LAST_STAGE, id));
   progress = withCurrent(progress, currentStage);
   saveProgress(progress);
@@ -686,6 +840,10 @@ function goStage(id: number): void {
 
 $('btnRetry').addEventListener('click', () => {
   hideCard();
+  if (endlessMode) {
+    goEndless();
+    return;
+  }
   tutorial.forgetIntro(currentStage);
   metrics.begin(currentStage, true);
   scene.retry();
@@ -757,8 +915,26 @@ window.__blast = {
     };
   },
   place: (trayIndex: number, row: number, col: number) => scene.stageState.canPlace(trayIndex, row, col),
+  /**
+   * その配置で何が起きるかの下読み。**盤面もゲーム状態も一切変更しない**
+   * （`previewPlacement` は clone 上の純粋関数。Preview.ts の 1〜4）。
+   * 自動確認が「ラインを消さない手」を選ぶために読む。
+   * **到達できない状態を作るための改変ではない。**
+   */
+  preview: (trayIndex: number, row: number, col: number) => {
+    const st = scene.stageState;
+    const piece = st.tray[trayIndex];
+    if (!piece) return null;
+    const r = previewPlacement(st.board, piece, row, col);
+    if (!r) return null;
+    return { lines: r.lineCells.length, detonations: r.triggerCells.length, effect: r.effect };
+  },
   /** 保存された進行と開発モード（自動確認から読むため）。 */
-  progress: () => ({ ...progress, devMode, sound: settings.sound }),
+  progress: () => ({ ...progress, devMode, sound: settings.sound, endless: endlessMode }),
+  /** プレイ記録（自動確認から読むため）。 */
+  stats: () => ({ ...stats }),
+  /** エンドレスを始める。**通常は全ステージクリアで開くが、検証用にここからも入れる。** */
+  goEndless: () => goEndless(),
   showTitle: () => showTitle(),
   /** 計測 JSON（DBG と同じもの）。自動確認から読むため。 */
   metrics: () => metrics.toJSON(),

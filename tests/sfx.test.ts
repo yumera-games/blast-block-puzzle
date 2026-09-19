@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Sfx, type SfxBackend, type SfxName } from '../src/audio/sfx';
+import { Sfx, playsSoloDetonation, type SfxBackend, type SfxName } from '../src/audio/sfx';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '../src/game/settings';
 
 /** スピーカーへ出さない backend。**鳴らす規則だけ**を見る。 */
@@ -30,6 +30,21 @@ function clock() {
   return { now: () => t, advance: (ms: number) => void (t += ms) };
 }
 
+/** 現在の効果音の全種類。**増えたらここも増やす。** */
+const ALL_SOUNDS: readonly SfxName[] = ['place', 'line', 'special', 'detonate', 'combo', 'clear', 'fail'];
+
+describe('sfx: 単独起爆と COMBO の優先', () => {
+  it('COMBO の手では単独起爆の音を鳴らさない', () => {
+    expect(playsSoloDetonation(1, true)).toBe(false);
+    expect(playsSoloDetonation(3, true)).toBe(false);
+  });
+
+  it('COMBO でない手なら、起爆があるときだけ鳴らす', () => {
+    expect(playsSoloDetonation(1, false)).toBe(true);
+    expect(playsSoloDetonation(0, false)).toBe(false);
+  });
+});
+
 describe('sfx: 鳴らす規則', () => {
   it('最初のユーザー操作の前は鳴らない（自動再生制限への対応）', () => {
     const f = fakeBackend();
@@ -43,12 +58,49 @@ describe('sfx: 鳴らす規則', () => {
     expect(f.played).toEqual(['place']);
   });
 
-  it('OFF では 5 種類とも鳴らない', () => {
+  it('OFF では 7 種類とも鳴らない', () => {
     const f = fakeBackend();
     const s = new Sfx(f.backend, { enabled: false, now: () => 0 });
     s.unlock();
-    for (const n of ['place', 'line', 'combo', 'clear', 'fail'] as SfxName[]) s.play(n);
+    for (const n of ALL_SOUNDS) s.play(n);
     expect(f.played).toEqual([]);
+  });
+
+  it('ON なら 7 種類とも鳴る（工程 W-3 で足した 2 種類を含む）', () => {
+    const f = fakeBackend();
+    const c = clock();
+    const s = new Sfx(f.backend, { enabled: true, now: c.now });
+    s.unlock();
+    for (const n of ALL_SOUNDS) {
+      s.play(n);
+      c.advance(500); // 連打抑止にかからない間隔
+    }
+    expect(f.played).toEqual([...ALL_SOUNDS]);
+  });
+
+  it('特殊生成と単独起爆は、短い間隔の連打を 1 回にまとめる', () => {
+    const f = fakeBackend();
+    const c = clock();
+    const s = new Sfx(f.backend, { enabled: true, now: c.now });
+    s.unlock();
+    s.play('special');
+    c.advance(50);
+    s.play('special'); // 90ms 未満なので出ない
+    c.advance(50);
+    s.play('special'); // 100ms 経過したので出る
+    expect(f.played).toEqual(['special', 'special']);
+  });
+
+  it('特殊生成と単独起爆は「1 結果に 1 回」ではない（クリア・失敗とは別扱い）', () => {
+    const f = fakeBackend();
+    const c = clock();
+    const s = new Sfx(f.backend, { enabled: true, now: c.now });
+    s.unlock();
+    for (let i = 0; i < 3; i++) {
+      s.play('detonate');
+      c.advance(200);
+    }
+    expect(f.played).toEqual(['detonate', 'detonate', 'detonate']);
   });
 
   it('OFF のときは AudioContext を起こさない', () => {

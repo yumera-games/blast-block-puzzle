@@ -11,7 +11,7 @@
  * テストは差し替えた backend で規則だけを見る。実際のスピーカー出力に依存しない。
  */
 
-export type SfxName = 'place' | 'line' | 'combo' | 'clear' | 'fail';
+export type SfxName = 'place' | 'line' | 'special' | 'detonate' | 'combo' | 'clear' | 'fail';
 
 export interface SfxBackend {
   /** 1 音鳴らす。**失敗しても投げない。** */
@@ -26,6 +26,8 @@ export interface SfxBackend {
 const MIN_GAP_MS: Record<SfxName, number> = {
   place: 40,
   line: 80,
+  special: 90,
+  detonate: 90,
   combo: 200,
   clear: 400,
   fail: 400,
@@ -97,6 +99,20 @@ export class Sfx {
   }
 }
 
+/**
+ * その波で「特殊が 1 個だけ起爆した」音を鳴らすか（工程 W-3）。
+ *
+ * **COMBO の手では鳴らさない。**特殊 x 特殊 が成立した手では COMBO 音（と attack）が
+ * その手の合図なので、単独起爆の音を重ねると何が起きたのか分からなくなる。
+ *
+ * `comboMove` は **1 手につき 1 回だけ**判定した COMBO の有無（`hasCombo`）を渡す。
+ * 波ごとに数え直さないので、「波 1 は単独・波 2 で COMBO」という手でも
+ * 単独音は鳴らず、COMBO 音だけが残る。
+ */
+export function playsSoloDetonation(detonationCount: number, comboMove: boolean): boolean {
+  return detonationCount > 0 && !comboMove;
+}
+
 /* ------------------------------------------------------------ Web Audio 実装 */
 
 interface Tone {
@@ -112,6 +128,12 @@ const TONES: Record<SfxName, Tone> = {
   place: { type: 'sine', freqs: [520], dur: 0.06, gain: 0.18 },
   // ライン消去：明るい上向き。置く音と区別できるよう 2 音。
   line: { type: 'triangle', freqs: [660, 990], dur: 0.09, gain: 0.22, step: 0.055 },
+  // 特殊が生まれた：柔らかい上向きのきらめき。**ライン消去より高く、短い。**
+  // 「消えた」ではなく「残った」ことを示すので、line と混ざらない音域にする。
+  special: { type: 'sine', freqs: [1245, 1661], dur: 0.12, gain: 0.2, step: 0.05 },
+  // 特殊が 1 個だけ起爆した：低い下向きの手応え。COMBO のきらめきとは別方向。
+  // COMBO の手では鳴らさないので、**この音は「単独だった」ことの合図になる。**
+  detonate: { type: 'triangle', freqs: [196, 131], dur: 0.16, gain: 0.26, step: 0.05 },
   // COMBO：きらめき（高い 3 音）＋低い手応え。attack と同じ COMBO 判定で鳴る。
   combo: { type: 'triangle', freqs: [880, 1175, 1568, 220], dur: 0.1, gain: 0.24, step: 0.06 },
   // クリア：短い上昇フレーズ。
