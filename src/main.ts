@@ -3,6 +3,7 @@ import { GameScene, type SceneHooks } from './scenes/GameScene';
 import { Hud } from './ui/Hud';
 import { TutorialOverlay } from './ui/TutorialOverlay';
 import type { AttackPlacement } from './game/attack';
+import { isUnlocked, loadProgress, saveProgress, withCleared, withCurrent } from './game/progress';
 import { DebugPanel } from './ui/DebugPanel';
 import { PlayMetrics } from './ui/PlayMetrics';
 import { computeLayout, type Layout } from './ui/layout';
@@ -29,7 +30,19 @@ const tutorial = new TutorialOverlay($('hint'));
 const overlay = $('overlay');
 const overlayCard = $('overlayCard');
 
-let currentStage = FIRST_STAGE;
+/** 保存された進行。**壊れていても既定値で起動する**（progress.ts）。 */
+let progress = loadProgress();
+let currentStage = progress.current;
+
+/** 開発用 UI を出すか。`?debug=1`（または `#debug`）のときだけ。
+ *  **消すのではなく、通常のプレイヤーから隠すだけ。** */
+const devMode = (() => {
+  try {
+    return new URLSearchParams(location.search).get('debug') === '1' || location.hash === '#debug';
+  } catch {
+    return false;
+  }
+})();
 let layout: Layout = computeLayout(360, 640, 1);
 
 const hooks: SceneHooks = {
@@ -68,6 +81,11 @@ const hooks: SceneHooks = {
     else hideCard();
   },
   onStageEnd(state) {
+    // クリアしたら進行を進める。**失敗では進めない。**演出の途中経過は保存しない。
+    if (state.status === 'cleared') {
+      progress = withCleared(progress, state.def.id);
+      saveProgress(progress);
+    }
     if (state.status === 'cleared') showClear(state);
     else showFailed(state);
   },
@@ -510,6 +528,8 @@ function retryStage(): void {
 
 function goStage(id: number): void {
   currentStage = Math.max(FIRST_STAGE, Math.min(LAST_STAGE, id));
+  progress = withCurrent(progress, currentStage);
+  saveProgress(progress);
   metrics.begin(currentStage, false);
   scene.loadStage(currentStage);
 }
@@ -524,21 +544,35 @@ $('btnRetry').addEventListener('click', () => {
 });
 
 $('btnStages').addEventListener('click', () => {
+  // プレイヤー向けのステージ選択。**まだ到達していないステージへは飛べない。**
+  // 開発時（?debug=1）だけ、確認のためすべて開ける。
   showCard({
-    title: 'STAGE SELECT',
-    buttons: STAGES.map((s) => ({ label: `${s.id}`, onClick: () => goStage(s.id) })),
+    title: 'ステージをえらぶ',
+    body: devMode ? undefined : `クリアすると つぎの ステージが ひらきます（いま ${Math.min(LAST_STAGE, progress.cleared + 1)} まで）`,
+    buttons: STAGES.filter((s) => devMode || isUnlocked(progress, s.id)).map((s) => ({
+      label: `${s.id}`,
+      primary: s.id === currentStage,
+      onClick: () => goStage(s.id),
+    })),
   });
 });
 
-$('btnDebug').addEventListener('click', () => {
-  const on = debug.toggle();
-  $('btnDebug').textContent = on ? 'DBG*' : 'DBG';
-});
+// 開発用。**通常のプレイヤーには出さない。**`?debug=1` でだけ現れる。
+if (devMode) {
+  $('btnDebug').addEventListener('click', () => {
+    const on = debug.toggle();
+    $('btnDebug').textContent = on ? 'DBG*' : 'DBG';
+  });
+} else {
+  $('btnDebug').remove();
+}
 
 /* ------------------------------------------------------------------ 立ち上げ */
 
 game.events.once('ready', () => {
   resize();
+  // **保存された進行から、そのステージの開始状態で始める。**
+  // 演出の途中や awaitingTeach からは復元しない（progress.ts）。
   metrics.begin(currentStage, false);
   scene.loadStage(currentStage);
 });
@@ -572,6 +606,8 @@ window.__blast = {
     };
   },
   place: (trayIndex: number, row: number, col: number) => scene.stageState.canPlace(trayIndex, row, col),
+  /** 保存された進行と開発モード（自動確認から読むため）。 */
+  progress: () => ({ ...progress, devMode }),
   /** 計測 JSON（DBG と同じもの）。自動確認から読むため。 */
   metrics: () => metrics.toJSON(),
   /** 直前の resolution の要約（自動確認から意図したルールが起きたか読むため）。 */

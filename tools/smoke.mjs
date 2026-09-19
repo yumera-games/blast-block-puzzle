@@ -21,6 +21,8 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || (existsSync(L
 const launch = (o = {}) => chromium.launch(existsSync(LOCAL_BIN) ? { ...o, executablePath: LOCAL_BIN } : o);
 
 const URL = process.argv[2] || 'http://localhost:5183/';
+/** 開発用 UI（DBG）を使う検査はこちらから開く。**通常プレイヤーの画面は URL のまま。** */
+const DEV_URL = URL + (URL.includes('?') ? '&' : '?') + 'debug=1';
 const ng = [];
 const note = [];
 const browser = await launch();
@@ -38,7 +40,7 @@ for (const [w, h] of SIZES) {
   const errs = [];
   page.on('pageerror', (e) => errs.push(String(e.message)));
   page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
-  await page.goto(URL, { waitUntil: 'networkidle' });
+  await page.goto(DEV_URL, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
   await page.waitForTimeout(500);
 
@@ -149,7 +151,7 @@ const page = await ctx.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e.message)));
 page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
-await page.goto(URL, { waitUntil: 'networkidle' });
+await page.goto(DEV_URL, { waitUntil: 'networkidle' });
 await page.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
 await page.waitForTimeout(400);
 
@@ -667,6 +669,107 @@ await page.screenshot({ path: 'tools/out/stage01.png' });
     }
     await actx.close();
   }
+}
+
+/* ⑩ 進行の保存と、開発用 UI の分離（工程 W-1）。
+   通常起動ではプレイヤー向けだけを出し、`?debug=1` でだけ開発用を出す。
+   reduced-motion でも attack の見え方が変わらないことも、ここで見る
+   （attack は静止 WebP の出し入れだけで、CSS animation も tween も持たない）。 */
+{
+  const PST = `(() => ({
+    stage: window.__blast.state().stage,
+    prog: window.__blast.progress(),
+    dbg: !!document.getElementById('btnDebug'),
+    stageBtn: !!document.getElementById('btnStages'),
+  }))()`;
+  const pctx = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2 });
+  const pp = await pctx.newPage();
+  await pp.goto(URL, { waitUntil: 'networkidle' });
+  await pp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  const boot = await pp.evaluate(PST);
+  if (boot.dbg) ng.push('進行: 通常起動で DBG ボタンが見えている');
+  else if (!boot.stageBtn) ng.push('進行: 通常起動で STAGE ボタンが無い');
+  else if (boot.prog.devMode) ng.push('進行: 通常起動が devMode になっている');
+  else note.push('  進行: 通常起動では DBG が出ず、STAGE だけが出る');
+
+  // Stage 1 をクリアすると進行が保存され、再読み込みで Stage 2 から始まる
+  await pp.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
+  await pp.waitForTimeout(400);
+  await dragOn(pp, 0, 7, 7);
+  await pp.waitForTimeout(1500);
+  const cleared = await pp.evaluate(PST);
+  if (cleared.prog.cleared !== 1) ng.push(`進行: クリアしても cleared が ${cleared.prog.cleared}`);
+  else {
+    await pp.evaluate(() => {
+      const b = [...document.querySelectorAll('#overlayCard .btn')].find((x) => x.textContent === 'NEXT STAGE');
+      if (b) b.click();
+    });
+    await pp.waitForTimeout(600);
+    await pp.reload({ waitUntil: 'networkidle' });
+    await pp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+    const back = await pp.evaluate(PST);
+    if (back.stage !== 2) ng.push(`進行: 再読み込みで Stage ${back.stage} に戻った（2 のはず）`);
+    else note.push('  進行: クリア → 次ステージ → 再読み込みで Stage 2 から再開できる');
+  }
+
+  // 壊れた保存値でも起動する
+  await pp.evaluate(() => localStorage.setItem('blast-block:progress', '{{{ broken'));
+  await pp.reload({ waitUntil: 'networkidle' });
+  const okAfterBroken = await pp
+    .waitForFunction(() => !!window.__blast, null, { timeout: 10000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!okAfterBroken) ng.push('進行: 壊れた保存値でゲームが起動しない');
+  else {
+    const recovered = await pp.evaluate(PST);
+    if (recovered.stage !== 1) ng.push(`進行: 壊れた保存値から Stage ${recovered.stage} で起動した（1 のはず）`);
+    else note.push('  進行: 壊れた保存値でも Stage 1 から安全に起動する');
+  }
+  await pctx.close();
+
+  // ?debug=1 では開発用が使える
+  const dctx = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2 });
+  const dp = await dctx.newPage();
+  await dp.goto(DEV_URL, { waitUntil: 'networkidle' });
+  await dp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  const dev = await dp.evaluate(PST);
+  if (!dev.dbg || !dev.prog.devMode) ng.push('進行: ?debug=1 でも開発用 UI が出ない');
+  else note.push('  進行: ?debug=1 でだけ DBG と全ステージ選択が使える');
+  await dctx.close();
+
+  // reduced-motion でも attack は同じに出る
+  const rctx = await browser.newContext({
+    viewport: { width: 393, height: 852 },
+    deviceScaleFactor: 2,
+    reducedMotion: 'reduce',
+  });
+  const rp = await rctx.newPage();
+  await rp.goto(URL, { waitUntil: 'networkidle' });
+  await rp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  await rp.evaluate(() => window.__blast.goStage(10));
+  await rp.waitForTimeout(400);
+  await rp.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
+  await rp.waitForTimeout(400);
+  await dragOn(rp, 0, 7, 2);
+  await rp.waitForTimeout(300);
+  const rm = await rp.evaluate(() => {
+    const e = document.getElementById('attackFigure');
+    const cs = getComputedStyle(e);
+    const b = e.getBoundingClientRect();
+    return {
+      on: e.classList.contains('on'),
+      w: +b.width.toFixed(1),
+      h: +b.height.toFixed(1),
+      anim: cs.animationName,
+      trans: cs.transitionProperty,
+      transform: cs.transform,
+    };
+  });
+  if (!rm.on) ng.push('reduced-motion: attack が出ない（通常設定と同じに出るべき）');
+  else if (rm.anim !== 'none' || rm.transform !== 'none' || rm.trans !== 'all')
+    ng.push(`reduced-motion: attack に運動が付いている ${JSON.stringify(rm)}`);
+  else note.push(`  reduced-motion: attack は同じ静止表示（${rm.w}x${rm.h} / animation なし / transform なし）`);
+  await rctx.close();
 }
 
 if (errs.length) ng.push(`操作中に エラー ${errs.length} 件 — ${errs[0]}`);
