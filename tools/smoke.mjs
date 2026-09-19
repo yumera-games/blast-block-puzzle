@@ -21,8 +21,9 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || (existsSync(L
 const launch = (o = {}) => chromium.launch(existsSync(LOCAL_BIN) ? { ...o, executablePath: LOCAL_BIN } : o);
 
 const URL = process.argv[2] || 'http://localhost:5183/';
-/** 開発用 UI（DBG）を使う検査はこちらから開く。**通常プレイヤーの画面は URL のまま。** */
-const DEV_URL = URL + (URL.includes('?') ? '&' : '?') + 'debug=1';
+/** 開発用 UI（DBG）を使う検査はこちらから開く。**通常プレイヤーの画面は URL のまま。**
+ *  `skipTitle=1` はタイトルを飛ばす開発用の入口（通常起動には無い）。 */
+const DEV_URL = URL + (URL.includes('?') ? '&' : '?') + 'debug=1&skipTitle=1';
 const ng = [];
 const note = [];
 const browser = await launch();
@@ -687,13 +688,28 @@ await page.screenshot({ path: 'tools/out/stage01.png' });
   await pp.goto(URL, { waitUntil: 'networkidle' });
   await pp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
   const boot = await pp.evaluate(PST);
+  const title = await pp.evaluate(() => ({
+    on: document.getElementById('overlay').classList.contains('titleScreen'),
+    h2: document.querySelector('#overlayCard h2')?.textContent ?? '',
+    btns: [...document.querySelectorAll('#overlayCard .btn')].map((b) => b.textContent),
+    sound: !!document.getElementById('btnSound'),
+  }));
   if (boot.dbg) ng.push('進行: 通常起動で DBG ボタンが見えている');
   else if (!boot.stageBtn) ng.push('進行: 通常起動で STAGE ボタンが無い');
   else if (boot.prog.devMode) ng.push('進行: 通常起動が devMode になっている');
   else note.push('  進行: 通常起動では DBG が出ず、STAGE だけが出る');
+  if (!title.on) ng.push('タイトル: 起動直後にタイトルの幕が出ていない（盤面が見えてしまう）');
+  else if (!title.btns.includes('はじめる')) ng.push(`タイトル: 初回なのに ${JSON.stringify(title.btns)}`);
+  else if (!title.sound) ng.push('タイトル: 音 ON/OFF が無い');
+  else note.push(`  タイトル: "${title.h2}" ／ 初回は「はじめる」／音 ON/OFF あり`);
 
-  // Stage 1 をクリアすると進行が保存され、再読み込みで Stage 2 から始まる
-  await pp.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
+  // タイトル →（intro）→ Stage 1 をクリア → 進行が保存され、再読み込みで Stage 2 から
+  await pp.evaluate(() => {
+    const b = [...document.querySelectorAll('#overlayCard .btn')].find((x) => x.textContent === 'はじめる');
+    if (b) b.click();
+  });
+  await pp.waitForTimeout(600);
+  await pp.evaluate(() => { const b = document.querySelector('#overlayCard button[data-i]'); if (b) b.click(); });
   await pp.waitForTimeout(400);
   await dragOn(pp, 0, 7, 7);
   await pp.waitForTimeout(1500);
@@ -708,8 +724,12 @@ await page.screenshot({ path: 'tools/out/stage01.png' });
     await pp.reload({ waitUntil: 'networkidle' });
     await pp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
     const back = await pp.evaluate(PST);
+    const resume = await pp.evaluate(() =>
+      [...document.querySelectorAll('#overlayCard .btn')].map((b) => b.textContent),
+    );
     if (back.stage !== 2) ng.push(`進行: 再読み込みで Stage ${back.stage} に戻った（2 のはず）`);
-    else note.push('  進行: クリア → 次ステージ → 再読み込みで Stage 2 から再開できる');
+    else if (!resume.includes('つづきから')) ng.push(`タイトル: 進行ありなのに ${JSON.stringify(resume)}`);
+    else note.push('  進行: クリア → 次ステージ → 再読み込みでタイトルに「つづきから」が出て Stage 2 から再開');
   }
 
   // 壊れた保存値でも起動する
@@ -725,6 +745,57 @@ await page.screenshot({ path: 'tools/out/stage01.png' });
     if (recovered.stage !== 1) ng.push(`進行: 壊れた保存値から Stage ${recovered.stage} で起動した（1 のはず）`);
     else note.push('  進行: 壊れた保存値でも Stage 1 から安全に起動する');
   }
+
+  // 音：最初のユーザー操作まで鳴らさない／OFF で鳴らない
+  await pp.evaluate(() => localStorage.removeItem('blast-block:progress'));
+  await pp.addInitScript(() => {
+    window.__osc = 0;
+    const C = window.AudioContext || window.webkitAudioContext;
+    const O = C.prototype.createOscillator;
+    C.prototype.createOscillator = function (...a) {
+      window.__osc++;
+      return O.apply(this, a);
+    };
+  });
+  await pp.reload({ waitUntil: 'networkidle' });
+  await pp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  if ((await pp.evaluate(() => window.__osc)) !== 0)
+    ng.push('音: 最初のユーザー操作の前に鳴っている（自動再生制限に違反）');
+  await pp.evaluate(() => {
+    const b = [...document.querySelectorAll('#overlayCard .btn')].find((x) => x.textContent === 'はじめる');
+    if (b) b.click();
+  });
+  await pp.waitForTimeout(600);
+  await pp.evaluate(() => { const b = document.querySelector('#overlayCard button[data-i]'); if (b) b.click(); });
+  await pp.waitForTimeout(400);
+  const soundBefore = await pp.evaluate(() => window.__osc);
+  await dragOn(pp, 0, 7, 7);
+  await pp.waitForTimeout(1700);
+  const soundAfter = await pp.evaluate(() => window.__osc);
+  if (soundAfter - soundBefore === 0) ng.push('音: ON なのに配置・ライン消去・クリアで 1 音も鳴らない');
+  else note.push(`  音: 1 手（配置・ライン消去・クリア）で ${soundAfter - soundBefore} 音が鳴る`);
+
+  // OFF にすると鳴らない
+  await pp.evaluate(() => {
+    const b = [...document.querySelectorAll('#overlayCard .btn')].find((x) => x.textContent === 'NEXT STAGE');
+    if (b) b.click();
+  });
+  await pp.waitForTimeout(600);
+  await pp.evaluate(() => document.getElementById('btnSoundMain').click());
+  await pp.waitForTimeout(200);
+  const offState = await pp.evaluate(() => ({
+    sound: window.__blast.progress().sound,
+    pressed: document.getElementById('btnSoundMain').getAttribute('aria-pressed'),
+  }));
+  await pp.evaluate(() => { const b = document.querySelector('#overlayCard button[data-i]'); if (b) b.click(); });
+  await pp.waitForTimeout(400);
+  const offBefore = await pp.evaluate(() => window.__osc);
+  await dragOn(pp, 0, 7, 7);
+  await pp.waitForTimeout(1700);
+  const offAfter = await pp.evaluate(() => window.__osc);
+  if (offState.sound !== false || offState.pressed !== 'false') ng.push('音: OFF へ切り替わっていない');
+  else if (offAfter - offBefore !== 0) ng.push(`音: OFF なのに ${offAfter - offBefore} 音鳴った`);
+  else note.push('  音: OFF では 5 種類とも鳴らない（aria-pressed も false）');
   await pctx.close();
 
   // ?debug=1 では開発用が使える

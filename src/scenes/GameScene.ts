@@ -9,7 +9,7 @@ import { type ComboLink, TEACH_PROMPT, type TeachKind, comboLinkOf, waveMark, wa
 import { type AttackPlacement, attackEndMs, attackPlacement, hasCombo } from '../game/attack';
 import { arrowEndpoints, cellCenter } from '../ui/teachDraw';
 import { previewPlacement, type PreviewResult } from '../game/Preview';
-import { CELL_COLOR, CELL_EDGE, UI } from '../ui/colors';
+import { CELL_COLOR, CELL_DEEP, CELL_EDGE, UI } from '../ui/colors';
 import { PieceTray } from '../ui/PieceTray';
 import type { Layout } from '../ui/layout';
 
@@ -41,6 +41,8 @@ export interface SceneHooks {
   onIllegalDrop?(): void;
   /** ネイの attack 表示。`null` で消す。**表示の責務はここ 1 か所だけ**（2B 7-5-9）。 */
   onAttack?(placement: AttackPlacement | null): void;
+  /** 効果音。**鳴らす判断はシーン側、鳴らし方は main.ts の Sfx。** */
+  onSfx?(name: 'place' | 'line' | 'combo'): void;
 }
 
 interface FadingCell {
@@ -457,6 +459,7 @@ export class GameScene extends Phaser.Scene {
     // スコアと目的は、この時点ではまだ 1 波も出さない（演出より先に結果を見せないため）。
     this.shownWaves = 0;
     this.view.place(piece.shape.cells, row, col, piece.color);
+    this.hooks.onSfx?.('place');
     this.emit();
 
     if (outcome.result && outcome.result.events.length > 0) this.playResolution(outcome.result);
@@ -537,9 +540,16 @@ export class GameScene extends Phaser.Scene {
       const first = i === 0;
       this.scheduleResolution(at, () => {
         this.showLines(ev);
+        // 消える見た目と同じ時点で鳴らす。**ラインが完成するのは波 1 だけ**なので
+        // （重力が無く、波 2 以降で新しいラインは揃わない）自然に 1 手 1 回になる。
+        if (ev.lines.length > 0) this.hooks.onSfx?.('line');
         // **同じ delay へ 2 本積むと実行順が決まらない。**波 1 の callback の中から
         // 呼んで、コード上で順序を一意にする（2B 7-5-9 の 3）。
-        if (first && attack) this.startAttack();
+        if (first && attack) {
+          this.startAttack();
+          // COMBO 音も attack と同じ 1 手 1 回。判定を作り直さない。
+          this.hooks.onSfx?.('combo');
+        }
       });
       this.scheduleResolution(at + TIMING.lineHighlight, () => this.applyEvent(ev));
       t = at + TIMING.lineHighlight + TIMING.removeFade + TIMING.betweenChains;
@@ -667,13 +677,19 @@ export class GameScene extends Phaser.Scene {
     // 盤面の下地
     g.fillStyle(UI.boardBg, 1);
     g.fillRect(l.boardX, l.boardY, l.boardW, l.boardH);
+    // 盤面の外周。**弱い色差だけ。**魔法の盤に見せるための境界で、光らせない。
+    g.lineStyle(Math.max(1, l.cell * 0.05), UI.boardEdge, 0.9);
+    g.strokeRect(l.boardX, l.boardY, l.boardW, l.boardH);
 
     for (let r = 0; r < this.view.rows; r++) {
       for (let c = 0; c < this.view.cols; c++) {
         const x = l.boardX + c * l.cell;
         const y = l.boardY + r * l.cell;
+        // 空セル。**上辺を少し暗くしてへこんで見せる。**青ブロックと混同しない彩度。
         g.fillStyle(UI.cellEmpty, 1);
         g.fillRect(x + 1, y + 1, l.cell - 2, l.cell - 2);
+        g.fillStyle(UI.cellEmptyTop, 1);
+        g.fillRect(x + 1, y + 1, l.cell - 2, Math.max(1, l.cell * 0.08));
       }
     }
 
@@ -1072,11 +1088,39 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Gray Box の 1 セル。特殊ピースは形で見分けられるようにする。 */
+  /**
+   * ブロックの面を縦グラデーションで塗る。**画像は作らない。**
+   * 1 セルあたり数本の矩形で済ませる（各フレームで画像を作らない・ぼかさない）。
+   */
+  private fillGradient(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    top: number,
+    bottom: number,
+    alpha: number,
+  ): void {
+    const steps = 4;
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const r = Math.round(((top >> 16) & 0xff) * (1 - t) + ((bottom >> 16) & 0xff) * t);
+      const gg = Math.round(((top >> 8) & 0xff) * (1 - t) + ((bottom >> 8) & 0xff) * t);
+      const b = Math.round((top & 0xff) * (1 - t) + (bottom & 0xff) * t);
+      g.fillStyle((r << 16) | (gg << 8) | b, alpha);
+      // 帯の継ぎ目が出ないよう 0.5px ぶん重ねる。
+      g.fillRect(x, y + (h * i) / steps, w, h / steps + 0.5);
+    }
+  }
+
   private drawCell(g: Phaser.GameObjects.Graphics, x: number, y: number, size: number, cell: Cell, alpha: number): void {
     const inset = Math.max(1, size * 0.06);
     const w = size - inset * 2;
     const color = cell.color ? CELL_COLOR[cell.color] : 0x6b7383;
     const edge = cell.color ? CELL_EDGE[cell.color] : 0x99a1b2;
+    const deep = cell.color ? CELL_DEEP[cell.color] : 0x474e5c;
+    const radius = Math.max(2, size * 0.12);
 
     if (cell.kind === 'rainbow') {
       const stripes = [CELL_COLOR.red, CELL_COLOR.yellow, CELL_COLOR.green, CELL_COLOR.blue, CELL_COLOR.purple];
@@ -1085,16 +1129,21 @@ export class GameScene extends Phaser.Scene {
         g.fillStyle(stripes[i]!, alpha);
         g.fillRect(x + inset, y + inset + i * h, w, h + 0.5);
       }
+      // 5 色の帯＝RAINBOW。**白い角丸の枠**で他の特殊と区別する。
       g.lineStyle(Math.max(2, size * 0.09), 0xffffff, alpha);
-      g.strokeRect(x + inset, y + inset, w, w);
+      g.strokeRoundedRect(x + inset, y + inset, w, w, radius);
       return;
     }
 
     if (cell.kind === 'rocket' || cell.kind === 'bomb') {
+      // 特殊は**暗い面＋色の太枠**。記号（三角＝ROCKET の向き／丸＝BOMB）は変えない。
       g.fillStyle(UI.special, alpha);
-      g.fillRect(x + inset, y + inset, w, w);
+      g.fillRoundedRect(x + inset, y + inset, w, w, radius);
       g.lineStyle(Math.max(2, size * 0.09), color, alpha);
-      g.strokeRect(x + inset, y + inset, w, w);
+      g.strokeRoundedRect(x + inset, y + inset, w, w, radius);
+      // 記号の下に弱い面を敷いて、小さい端末でも記号が沈まないようにする。
+      g.fillStyle(deep, alpha * 0.45);
+      g.fillRoundedRect(x + inset + w * 0.16, y + inset + w * 0.16, w * 0.68, w * 0.68, radius * 0.6);
       const cx = x + size / 2;
       const cy = y + size / 2;
       if (cell.kind === 'rocket') {
@@ -1116,9 +1165,18 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    g.fillStyle(color, alpha);
-    g.fillRect(x + inset, y + inset, w, w);
-    g.fillStyle(edge, alpha * 0.9);
-    g.fillRect(x + inset, y + inset, w, Math.max(1, size * 0.09));
+    // 通常ブロック。**角丸 → 縦グラデーション → 上辺ハイライト → 底の陰**の 4 層。
+    // 形も大きさも従来どおりで、色の意味も変えていない。
+    g.fillStyle(deep, alpha);
+    g.fillRoundedRect(x + inset, y + inset, w, w, radius);
+    // 角丸の内側だけを塗るため、少し内へ入れてグラデーションを重ねる。
+    const pad = Math.max(1, size * 0.05);
+    this.fillGradient(g, x + inset + pad * 0.5, y + inset + pad * 0.5, w - pad, w - pad, color, deep, alpha);
+    // 上辺の弱いハイライト。常時発光させない。
+    g.fillStyle(edge, alpha * 0.85);
+    g.fillRect(x + inset + pad, y + inset + pad * 0.6, w - pad * 2, Math.max(1, size * 0.07));
+    // 底の内側の陰。平面に見えないようにするだけ。
+    g.fillStyle(deep, alpha * 0.55);
+    g.fillRect(x + inset + pad, y + inset + w - pad * 1.4, w - pad * 2, Math.max(1, size * 0.05));
   }
 }

@@ -4,6 +4,8 @@ import { Hud } from './ui/Hud';
 import { TutorialOverlay } from './ui/TutorialOverlay';
 import type { AttackPlacement } from './game/attack';
 import { isUnlocked, loadProgress, saveProgress, withCleared, withCurrent } from './game/progress';
+import { loadSettings, saveSettings } from './game/settings';
+import { Sfx, createWebAudioBackend } from './audio/sfx';
 import { DebugPanel } from './ui/DebugPanel';
 import { PlayMetrics } from './ui/PlayMetrics';
 import { computeLayout, type Layout } from './ui/layout';
@@ -33,6 +35,11 @@ const overlayCard = $('overlayCard');
 /** 保存された進行。**壊れていても既定値で起動する**（progress.ts）。 */
 let progress = loadProgress();
 let currentStage = progress.current;
+
+/** 音の設定。**進行データとは別のキー**（settings.ts）。 */
+let settings = loadSettings();
+/** 効果音。**最初のユーザー操作まで AudioContext を作らない。** */
+const sfx = new Sfx(createWebAudioBackend(), { enabled: settings.sound });
 
 /** 開発用 UI を出すか。`?debug=1`（または `#debug`）のときだけ。
  *  **消すのではなく、通常のプレイヤーから隠すだけ。** */
@@ -71,9 +78,14 @@ const hooks: SceneHooks = {
   onAttack(placement) {
     setAttack(placement);
   },
+  onSfx(name) {
+    sfx.play(name);
+  },
   onStageStart(state) {
     // RETRY・STAGE SELECT・次ステージのいずれもここを通る。失敗演出を捨てる。
     clearFailEffect();
+    // 新しい手番なので「この結果で 1 回」をやり直す。古い予約音も持ち越さない。
+    sfx.cancel();
     preloadFigure();
     preloadAttack();
     const intro = tutorial.takeIntro(state.def);
@@ -85,6 +97,9 @@ const hooks: SceneHooks = {
     if (state.status === 'cleared') {
       progress = withCleared(progress, state.def.id);
       saveProgress(progress);
+      sfx.play('clear');
+    } else if (state.status === 'failed') {
+      sfx.play('fail');
     }
     if (state.status === 'cleared') showClear(state);
     else showFailed(state);
@@ -219,8 +234,8 @@ function preloadFigure(): void {
  *   .layHead  … 上体に追従したうえでの首の追加回転。基準は首 y=470（master）
  * head を upper の子にしているので、**上体が動いても首が離れない。**
  */
-function figureHtml(): string {
-  if (figureBroken || !figureAllowed()) return '';
+function figureHtml(force = false): string {
+  if (figureBroken || (!force && !figureAllowed())) return '';
   const lay = (name: string): string =>
     `<img class="lay lay-${name}" alt="" aria-hidden="true" width="${FIGURE_W}" height="${FIGURE_H}" ` +
     `src="${layerSrc(name, '1x')}" srcset="${layerSrc(name, '1x')} 1x, ${layerSrc(name, '2x')} 2x">`;
@@ -413,6 +428,8 @@ function showCard(opts: {
   talk?: boolean;
   body?: string;
   stats?: string;
+  /** ボタン列の前へ差し込む HTML。音 ON/OFF の切り替えに使う。 */
+  extraHtml?: string;
   buttons: CardButton[];
 }): void {
   // 前のカードのクラスを残さない。intro や失敗カードへ勝利の面色が移らないようにする。
@@ -422,6 +439,8 @@ function showCard(opts: {
   // 次のカードへ前の幕が残らず、勝利と失敗が同時に付くこともない。
   overlay.classList.toggle('win', opts.cardClass === 'win');
   overlay.classList.toggle('failed', opts.cardClass === 'failed');
+  // タイトルだけ幕を不透明にする。**盤面を見せない。**
+  overlay.classList.toggle('titleScreen', opts.cardClass === 'title');
   // 別のカードが出た時点で、保留中の失敗演出は捨てる。
   // 古いタイマーが別ステージへ失敗カードを出さないようにする（3-16-4-1 の 10）。
   cancelFailTimers();
@@ -430,15 +449,17 @@ function showCard(opts: {
   cardSerial++;
   overlayCard.innerHTML =
     `<h2 class="${opts.titleClass ?? ''}">${escapeHtml(opts.title)}</h2>` +
-    (opts.figure ? figureHtml() : '') +
+    (opts.figure ? figureHtml(opts.cardClass === 'title') : '') +
     (opts.talk ? talkHtml() : '') +
     (opts.body ? `<p>${escapeHtml(opts.body)}</p>` : '') +
     (opts.stats ? `<div class="stats">${escapeHtml(opts.stats)}</div>` : '') +
+    (opts.extraHtml ?? '') +
     `<div class="btns">${opts.buttons
       .map((b, i) => `<button class="btn${b.primary ? ' primary' : ''}" data-i="${i}">${escapeHtml(b.label)}</button>`)
       .join('')}</div>`;
   watchFigure();
-  overlayCard.querySelectorAll('button').forEach((btn) => {
+  // **`data-i` を持つボタンだけ**を結線する。音トグルはカードを閉じない。
+  overlayCard.querySelectorAll('button[data-i]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const i = Number(btn.getAttribute('data-i'));
       hideCard();
@@ -451,7 +472,7 @@ function showCard(opts: {
 function hideCard(): void {
   overlay.classList.remove('on');
   // 勝利・失敗の幕も落とす。閉じている間も状態を残さない（3-16-2-1 / 3-16-4-1）。
-  overlay.classList.remove('win', 'failed');
+  overlay.classList.remove('win', 'failed', 'titleScreen');
   clearFailEffect();
   // talk 反応を即時中断し、タイマーを全部捨てる（7-4-1 の 7 の 1・2）。
   // カード DOM は次の showCard で作り直すので、talk 用要素も同時に消える（同 3）。
@@ -460,8 +481,135 @@ function hideCard(): void {
   overlayCard.classList.remove('talking');
 }
 
+/* ------------------------------------------------------ タイトルと音（W-2） */
+
+/** 正式名は README と CLAUDE.md の「BLAST BLOCK」。**新しい名前を作らない。** */
+const GAME_TITLE = 'BLAST BLOCK';
+
+/** 音 ON / OFF のボタンを作る。**カードのボタン列とは別に、見出しの下へ置く。** */
+function soundToggleHtml(): string {
+  const on = settings.sound;
+  return (
+    `<button type="button" id="btnSound" class="soundToggle" ` +
+    `aria-pressed="${on ? 'true' : 'false'}" aria-label="効果音を${on ? 'オフ' : 'オン'}にする">` +
+    `<span class="mark" aria-hidden="true">${on ? '♪' : '✕'}</span>` +
+    `<span class="lbl">おと ${on ? 'ON' : 'OFF'}</span></button>`
+  );
+}
+
+/**
+ * 音トグルを押したときの共通処理。
+ * **タイトル・カード内のボタンと、プレイ画面の操作列のボタンは同じ設定を見る。**
+ * 通常モードでもデバッグモードでも同じ。
+ */
+function toggleSound(): void {
+  settings = { ...settings, sound: !settings.sound };
+  saveSettings(settings);
+  sfx.setEnabled(settings.sound);
+  const inCard = document.getElementById('btnSound');
+  if (inCard) {
+    inCard.outerHTML = soundToggleHtml();
+    bindSoundToggle();
+  }
+  syncSoundMain();
+}
+
+/** プレイ画面（操作列）の音ボタンを設定へ合わせる。**ラベル幅は変えない。** */
+function syncSoundMain(): void {
+  const btn = document.getElementById('btnSoundMain');
+  if (!btn) return;
+  const on = settings.sound;
+  btn.textContent = on ? '♪' : '✕';
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.setAttribute('aria-label', `効果音を${on ? 'オフ' : 'オン'}にする`);
+}
+
+function bindSoundToggle(): void {
+  const btn = document.getElementById('btnSound');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    // 音を出す前に、必ずユーザー操作の中で AudioContext を起こす（iOS 対応）。
+    sfx.unlock();
+    toggleSound();
+  });
+}
+
+/**
+ * タイトル画面。**ページを開いた直後に盤面を見せない。**
+ * 既存の結果カードと同じ仕組みを使い、幕だけ不透明にする。
+ * 人物は**勝利カード用のネイをそのまま再利用**する（新規画像を作らない）。
+ */
+function showTitle(): void {
+  const hasProgress = progress.cleared > 0;
+  const start = (): void => {
+    // 最初のユーザー操作。ここで初めて AudioContext を起こす。
+    sfx.unlock();
+    hideCard();
+    goStage(progress.current);
+  };
+  showCard({
+    title: GAME_TITLE,
+    cardClass: 'title',
+    figure: true,
+    body: hasProgress
+      ? `ステージ ${progress.cleared} まで クリア\nつぎは ステージ ${progress.current}`
+      : 'ブロックを ならべて ラインを けそう',
+    extraHtml: soundToggleHtml(),
+    buttons: hasProgress
+      ? [
+          { label: 'ステージをえらぶ', onClick: () => { sfx.unlock(); showStageSelect(); } },
+          { label: 'つづきから', primary: true, onClick: start },
+        ]
+      : [{ label: 'はじめる', primary: true, onClick: start }],
+  });
+  bindSoundToggle();
+}
+
+/** ステージ選択。**到達済み＋次の 1 つ**まで。開発時だけ全件。 */
+function showStageSelect(): void {
+  const open = Math.min(LAST_STAGE, progress.cleared + 1);
+  showCard({
+    title: 'ステージをえらぶ',
+    body: devMode ? undefined : `クリアすると つぎの ステージが ひらきます（いま ${open} まで）`,
+    extraHtml: soundToggleHtml(),
+    buttons: STAGES.filter((st) => devMode || isUnlocked(progress, st.id)).map((st) => ({
+      label: `${st.id}`,
+      primary: st.id === currentStage,
+      onClick: () => goStage(st.id),
+    })),
+  });
+  bindSoundToggle();
+}
+
+/**
+ * 全ステージクリアの締め。**進行データは消さない。**
+ * 「もう一度あそぶ」は Stage 1 を開くだけで、クリア済みの記録はそのまま残る。
+ */
+function showAllClear(state: StageState): void {
+  showCard({
+    title: 'ぜんステージ クリア',
+    titleClass: 'ok',
+    cardClass: 'win',
+    figure: true,
+    body: `ぜん ${LAST_STAGE} ステージを クリアしました。\nさいごの ステージ ${state.def.id} も とっぱです。`,
+    stats: `SCORE ${state.score}   MOVES USED ${state.movesUsed}   MAX CHAIN ${state.maxChain}`,
+    extraHtml: soundToggleHtml(),
+    buttons: [
+      { label: 'ステージをえらぶ', onClick: () => showStageSelect() },
+      { label: 'もう一度あそぶ', primary: true, onClick: () => goStage(FIRST_STAGE) },
+    ],
+  });
+  bindSoundToggle();
+}
+
 function showClear(state: StageState): void {
   const isLast = state.def.id >= LAST_STAGE;
+  // 最終ステージのクリアは締めの画面にする。**Stage 1 へ即座に戻さない。**
+  if (isLast) {
+    showAllClear(state);
+    startTalk();
+    return;
+  }
   showCard({
     title: 'STAGE CLEAR',
     titleClass: 'ok',
@@ -544,18 +692,16 @@ $('btnRetry').addEventListener('click', () => {
 });
 
 $('btnStages').addEventListener('click', () => {
-  // プレイヤー向けのステージ選択。**まだ到達していないステージへは飛べない。**
-  // 開発時（?debug=1）だけ、確認のためすべて開ける。
-  showCard({
-    title: 'ステージをえらぶ',
-    body: devMode ? undefined : `クリアすると つぎの ステージが ひらきます（いま ${Math.min(LAST_STAGE, progress.cleared + 1)} まで）`,
-    buttons: STAGES.filter((s) => devMode || isUnlocked(progress, s.id)).map((s) => ({
-      label: `${s.id}`,
-      primary: s.id === currentStage,
-      onClick: () => goStage(s.id),
-    })),
-  });
+  sfx.unlock();
+  showStageSelect();
 });
+
+// プレイ画面からも音を切り替えられる。**カード内のボタンと同じ設定。**
+$('btnSoundMain').addEventListener('click', () => {
+  sfx.unlock();
+  toggleSound();
+});
+syncSoundMain();
 
 // 開発用。**通常のプレイヤーには出さない。**`?debug=1` でだけ現れる。
 if (devMode) {
@@ -571,10 +717,15 @@ if (devMode) {
 
 game.events.once('ready', () => {
   resize();
-  // **保存された進行から、そのステージの開始状態で始める。**
+  // **まずタイトルを出す。**盤面はその後ろで読み込まれるが、幕が不透明なので見えない。
+  // 入力も #overlay が受け止めるので、背後で手が進むことはない。
   // 演出の途中や awaitingTeach からは復元しない（progress.ts）。
   metrics.begin(currentStage, false);
   scene.loadStage(currentStage);
+  // `?debug=1&skipTitle=1` のときだけタイトルを飛ばす。**通常起動には影響しない。**
+  const skip = devMode && new URLSearchParams(location.search).get('skipTitle') === '1';
+  if (skip) return;
+  showTitle();
 });
 
 // 検証用の入口。Phase 1 の自動確認（Playwright など）から状態を読むために出す。
@@ -607,7 +758,8 @@ window.__blast = {
   },
   place: (trayIndex: number, row: number, col: number) => scene.stageState.canPlace(trayIndex, row, col),
   /** 保存された進行と開発モード（自動確認から読むため）。 */
-  progress: () => ({ ...progress, devMode }),
+  progress: () => ({ ...progress, devMode, sound: settings.sound }),
+  showTitle: () => showTitle(),
   /** 計測 JSON（DBG と同じもの）。自動確認から読むため。 */
   metrics: () => metrics.toJSON(),
   /** 直前の resolution の要約（自動確認から意図したルールが起きたか読むため）。 */

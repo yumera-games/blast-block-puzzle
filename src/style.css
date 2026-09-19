@@ -346,3 +346,39 @@ button.btn.narrow { flex: 0 0 64px; }
   z-index: 5;
 }
 #attackFigure.on { display: block; }
+
+/* タイトル画面（工程 W-2）。**幕を不透明にして、後ろの盤面を見せない。**
+   人物は勝利カード用のネイをそのまま使う（新規画像は作らない）。
+   320px 幅でも縦に収まるよう、タイトルでだけ人物を小さく出す。 */
+#overlay.titleScreen { background: var(--bg); }
+#overlay .card.title { background: var(--panel); border-color: var(--line); }
+#overlay .card.title h2 { font-size: 22px; letter-spacing: .14em; }
+#overlay .card.title p { text-align: center; }
+#overlay .card.title .figStack { width: 106px; height: 251px; }
+#overlay .card.title .figStack img { width: 106px; height: 251px; }
+
+/* 音 ON / OFF。**押してもカードは閉じない。**ON と OFF で幅を変えないので
+   レイアウトが動かない。タップ領域は 44px 以上。 */
+.soundToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  margin: 10px 0 0;
+  padding: 0 12px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.soundToggle:active { background: #323949; }
+.soundToggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.soundToggle .mark { width: 16px; text-align: center; color: var(--accent); }
+.soundToggle[aria-pressed='false'] .mark { color: var(--muted); }
+/* 文字数を固定して、ON / OFF で横幅が動かないようにする。 */
+.soundToggle .lbl { min-width: 72px; text-align: left; font-variant-numeric: tabular-nums; }
