@@ -850,59 +850,59 @@ await page.screenshot({ path: 'tools/out/stage01.png' });
    エンドレスは**全ステージクリアでだけ**開く（進行データの cleared だけで決める）。
    検証用に `?debug=1` からも始められるようにしてあるので、実際に最後まで遊んで
    「置けなくなったら終わる」「記録が残る」「進行データを汚さない」を見る。 */
-{
-  /** 置ける手をひとつ探す。`noLine` なら**ラインも起爆も起きない手**だけを選ぶ。 */
-  const findMove = (page, noLine) =>
-    page.evaluate((nl) => {
-      const B = window.__blast;
-      const st = B.state();
-      for (let i = 0; i < st.tray.length; i++) {
-        if (!st.tray[i]) continue;
-        for (let row = 0; row < 8; row++)
-          for (let col = 0; col < 8; col++) {
-            if (!B.place(i, row, col)) continue;
-            if (nl) {
-              const pv = B.preview(i, row, col);
-              if (!pv || pv.lines > 0 || pv.detonations > 0) continue;
-            }
-            return { i, row, col };
+/** 置ける手をひとつ探す。`noLine` なら**ラインも起爆も起きない手**だけを選ぶ。 */
+const findMove = (page, noLine) =>
+  page.evaluate((nl) => {
+    const B = window.__blast;
+    const st = B.state();
+    for (let i = 0; i < st.tray.length; i++) {
+      if (!st.tray[i]) continue;
+      for (let row = 0; row < 8; row++)
+        for (let col = 0; col < 8; col++) {
+          if (!B.place(i, row, col)) continue;
+          if (nl) {
+            const pv = B.preview(i, row, col);
+            if (!pv || pv.lines > 0 || pv.detonations > 0) continue;
           }
-      }
-      return null;
-    }, noLine);
-
-  const settle = (page) =>
-    page
-      .waitForFunction(
-        () => {
-          const s = window.__blast.state();
-          return !s.busy && !s.awaitingTeach;
-        },
-        null,
-        { timeout: 8000 },
-      )
-      .catch(() => undefined);
-
-  /** 終わるまで（または上限まで）遊ぶ。**実際のドラッグ操作で進める。** */
-  const playOut = async (page, { noLine = false, max = 300 } = {}) => {
-    let moves = 0;
-    for (; moves < max; moves++) {
-      const st = await page.evaluate(() => window.__blast.state());
-      if (st.status !== 'playing') break;
-      const m = await findMove(page, noLine);
-      if (!m) break;
-      await dragOn(page, m.i, m.row, m.col);
-      await settle(page);
+          return { i, row, col };
+        }
     }
-    return moves;
-  };
+    return null;
+  }, noLine);
 
-  const dismissCard = (page) =>
-    page.evaluate(() => {
-      const b = document.querySelector('#overlayCard button[data-i]');
-      if (b) b.click();
-    });
+const settle = (page) =>
+  page
+    .waitForFunction(
+      () => {
+        const s = window.__blast.state();
+        return !s.busy && !s.awaitingTeach;
+      },
+      null,
+      { timeout: 8000 },
+    )
+    .catch(() => undefined);
 
+/** 終わるまで（または上限まで）遊ぶ。**実際のドラッグ操作で進める。** */
+const playOut = async (page, { noLine = false, max = 300 } = {}) => {
+  let moves = 0;
+  for (; moves < max; moves++) {
+    const st = await page.evaluate(() => window.__blast.state());
+    if (st.status !== 'playing') break;
+    const m = await findMove(page, noLine);
+    if (!m) break;
+    await dragOn(page, m.i, m.row, m.col);
+    await settle(page);
+  }
+  return moves;
+};
+
+const dismissCard = (page) =>
+  page.evaluate(() => {
+    const b = document.querySelector('#overlayCard button[data-i]');
+    if (b) b.click();
+  });
+
+{
   // --- エンドレスは全ステージクリアまで開かない
   const lctx = await browser.newContext({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 2 });
   const lp = await lctx.newPage();
@@ -1055,6 +1055,280 @@ await page.screenshot({ path: 'tools/out/stage01.png' });
   else if (again.runs !== over.stats.endlessRuns) ng.push('エンドレス: 始めただけで回数が増えた');
   else note.push(`  エンドレス: 「もういちど」は新しい seed(${again.seed}) で 0 手から始まる`);
   await ectx.close();
+}
+
+/* ⑫ 通常ステージの自己記録・クリアカードの新記録・ステージ選択（工程 W-4）。
+   記録は「正規にクリアしたときだけ」更新する。同じクリアで 2 回数えない。
+   Stage 1 は初期盤面と 1 セット目が固定なので、**2 通りの正規ルートを実際に操作して**
+   手数の記録が更新されることまで見られる。
+     ルート A（1 手）… dot を (7,7) へ置いて行 7 を完成
+     ルート B（3 手）… dot と h2 を空き地へ逃がし、v2 を (6,7) へ置いて行 7 を完成
+   どちらもスコアは 80（1 ライン＝8 セル）なので、**スコアの大小そのものは
+   Stage 1 の正規プレイでは作れない。**その判定は records の単体試験側にある。 */
+{
+  const REC = `(() => ({
+    records: window.__blast.records().stages,
+    prog: window.__blast.progress(),
+    status: window.__blast.state().status,
+  }))()`;
+  const CARD = `(() => ({
+    h2: document.querySelector('#overlayCard h2')?.textContent ?? '',
+    record: !!document.querySelector('#overlayCard .record'),
+    rows: [...document.querySelectorAll('#overlayCard .statRow')].map(
+      (r) => r.querySelector('.k').textContent + '=' + r.querySelector('.v').textContent +
+             (r.classList.contains('neu') ? '(NEW)' : ''),
+    ),
+  }))()`;
+
+  const routeA = async (page) => {
+    await dragOn(page, 0, 7, 7);
+    await settle(page);
+  };
+  const routeB = async (page) => {
+    await dragOn(page, 0, 0, 0);
+    await settle(page);
+    await dragOn(page, 1, 0, 2);
+    await settle(page);
+    await dragOn(page, 2, 6, 7);
+    await settle(page);
+  };
+  const retryFromCard = async (page) => {
+    await page.evaluate(() => {
+      const b = [...document.querySelectorAll('#overlayCard .btn')].find((x) => x.textContent === 'RETRY');
+      if (b) b.click();
+    });
+    await page.waitForTimeout(400);
+  };
+
+  const rctx2 = await browser.newContext({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 2 });
+  const rp2 = await rctx2.newPage();
+  const rerrs = [];
+  rp2.on('pageerror', (e) => rerrs.push(String(e.message)));
+  rp2.on('console', (m) => { if (m.type() === 'error') rerrs.push('console: ' + m.text()); });
+  await rp2.goto(DEV_URL, { waitUntil: 'networkidle' });
+  await rp2.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  await rp2.evaluate(() => window.__blast.goStage(1));
+  await rp2.waitForTimeout(400);
+  await dismissCard(rp2);
+  await rp2.waitForTimeout(300);
+
+  // 1回目：3手ルートで初回クリア → 3項目とも新記録
+  await routeB(rp2);
+  await rp2.waitForTimeout(600);
+  const first = await rp2.evaluate(REC);
+  const firstCard = await rp2.evaluate(CARD);
+  if (JSON.stringify(first.records['1']) !== JSON.stringify({ bestScore: 80, bestMovesUsed: 3, bestMaxChain: 1, clearCount: 1 }))
+    ng.push(`記録: 初回クリアの記録が ${JSON.stringify(first.records['1'])}`);
+  else if (!firstCard.record || firstCard.rows.filter((r) => r.includes('(NEW)')).length !== 3)
+    ng.push(`記録: 初回クリアのカードが ${JSON.stringify(firstCard)}`);
+  else note.push(`  記録: 初回クリアで記録ができ、3項目とも新記録（${firstCard.rows.join(' ')}）`);
+
+  // カードの再描画（音 ON/OFF）では clearCount を増やさない
+  await rp2.evaluate(() => document.getElementById('btnSound')?.click());
+  await rp2.waitForTimeout(150);
+  await rp2.evaluate(() => document.getElementById('btnSound')?.click());
+  await rp2.waitForTimeout(150);
+  const afterToggle = await rp2.evaluate(REC);
+  if (JSON.stringify(afterToggle.records['1']) !== JSON.stringify(first.records['1']))
+    ng.push('記録: 音 ON/OFF のカード再描画で記録が変わった');
+  else note.push('  記録: クリアカードを再描画しても clearCount は増えない');
+
+  // 2回目：1手ルート → 手数だけ更新（スコアは同点なので更新しない）
+  await retryFromCard(rp2);
+  await routeA(rp2);
+  await rp2.waitForTimeout(600);
+  const second = await rp2.evaluate(REC);
+  const secondCard = await rp2.evaluate(CARD);
+  const newRows = secondCard.rows.filter((r) => r.includes('(NEW)'));
+  if (JSON.stringify(second.records['1']) !== JSON.stringify({ bestScore: 80, bestMovesUsed: 1, bestMaxChain: 1, clearCount: 2 }))
+    ng.push(`記録: 1手クリア後の記録が ${JSON.stringify(second.records['1'])}`);
+  else if (!secondCard.record || newRows.length !== 1 || !newRows[0].startsWith('MOVES USED'))
+    ng.push(`記録: 手数だけ更新のはずが ${JSON.stringify(secondCard)}`);
+  else note.push(`  記録: 3手 → 1手で bestMovesUsed だけ更新（${secondCard.rows.join(' ')}）`);
+  await rp2.screenshot({ path: `${SHOT_DIR}/w4-clearcard-newrecord-393x852.png` });
+
+  // 3回目：また3手ルート → どの項目も更新されず、新記録表示を出さない
+  await retryFromCard(rp2);
+  await routeB(rp2);
+  await rp2.waitForTimeout(600);
+  const third = await rp2.evaluate(REC);
+  const thirdCard = await rp2.evaluate(CARD);
+  if (JSON.stringify(third.records['1']) !== JSON.stringify({ bestScore: 80, bestMovesUsed: 1, bestMaxChain: 1, clearCount: 3 }))
+    ng.push(`記録: 3回目の記録が ${JSON.stringify(third.records['1'])}`);
+  else if (thirdCard.record || thirdCard.rows.some((r) => r.includes('(NEW)')))
+    ng.push(`記録: 更新が無いのに新記録表示が出た ${JSON.stringify(thirdCard)}`);
+  else note.push(`  記録: 更新なしのクリアでは新記録表示を出さず、clearCount だけ 3 へ（${thirdCard.rows.join(' ')}）`);
+  await rp2.screenshot({ path: `${SHOT_DIR}/w4-clearcard-norecord-393x852.png` });
+
+  // FAILED では記録が変わらない
+  await retryFromCard(rp2);
+  await playOut(rp2, { noLine: true, max: 12 });
+  await rp2.waitForTimeout(700);
+  const failed = await rp2.evaluate(REC);
+  if (failed.status !== 'failed') ng.push(`記録: FAILED を作れなかった（${failed.status}）`);
+  else if (JSON.stringify(failed.records['1']) !== JSON.stringify(third.records['1']))
+    ng.push('記録: FAILED で記録が変わった');
+  else note.push('  記録: FAILED では記録を更新しない');
+
+  // エンドレスでは通常ステージの記録を触らない
+  await rp2.evaluate(() => window.__blast.goEndless());
+  await rp2.waitForTimeout(400);
+  await dismissCard(rp2);
+  await rp2.waitForTimeout(300);
+  await playOut(rp2, { max: 5 });
+  const afterEndless = await rp2.evaluate(REC);
+  if (JSON.stringify(afterEndless.records) !== JSON.stringify(third.records))
+    ng.push('記録: エンドレスで通常ステージの記録が変わった');
+  else note.push('  記録: エンドレスでは通常ステージの記録を触らない');
+  if (rerrs.length) ng.push(`記録: 操作中にエラー ${rerrs.length} 件 — ${rerrs[0]}`);
+  await rctx2.close();
+
+  // --- ステージ選択・タイトル・再挑戦（3幅）
+  const seed = (cleared, current) => `
+    localStorage.setItem('blast-block:progress', JSON.stringify({version:1,current:${current},cleared:${cleared}}));
+    localStorage.setItem('blast-block:stats', JSON.stringify({version:1,endlessBest:8375,endlessRuns:3,allClearCount:1}));
+    localStorage.setItem('blast-block:records', JSON.stringify({version:1,stages:{
+      "1":{bestScore:80,bestMovesUsed:1,bestMaxChain:1,clearCount:3},
+      "2":{bestScore:160,bestMovesUsed:2,bestMaxChain:1,clearCount:1}}}));`;
+
+  for (const [w, h] of [[320, 568], [393, 852], [430, 932]]) {
+    const sctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2 });
+    const sp = await sctx.newPage();
+    const serrs = [];
+    sp.on('pageerror', (e) => serrs.push(String(e.message)));
+    sp.on('console', (m) => { if (m.type() === 'error') serrs.push('console: ' + m.text()); });
+    await sp.addInitScript(new Function(seed(5, 6)));
+    await sp.goto(URL, { waitUntil: 'networkidle' });
+    await sp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+    await sp.waitForTimeout(400);
+
+    // タイトル（途中まで）は次のステージを出す
+    const midTitle = await sp.evaluate(() => document.querySelector('#overlayCard p')?.textContent ?? '');
+    if (!midTitle.includes('つぎは ステージ 6')) ng.push(`${w}x${h} タイトル: 途中なのに "${midTitle}"`);
+
+    await sp.evaluate(() => {
+      const b = [...document.querySelectorAll('#overlayCard .btn')].find((x) => x.textContent === 'ステージをえらぶ');
+      if (b) b.click();
+    });
+    await sp.waitForTimeout(300);
+    const sel = await sp.evaluate(() => {
+      const card = document.getElementById('overlayCard');
+      const list = card.querySelector('.stageList');
+      const rows = [...list.querySelectorAll('.stageRow')];
+      const locked = rows.filter((r) => r.classList.contains('locked'));
+      return {
+        rows: rows.length,
+        buttons: rows.filter((r) => r.tagName === 'BUTTON').length,
+        lockedCount: locked.length,
+        lockedHasBest: locked.some((r) => r.querySelector('.best')),
+        lockedText: locked.map((r) => r.textContent.replace(/\s+/g, ' ')).slice(0, 1),
+        best1: rows[0].querySelector('.bv')?.textContent ?? null,
+        best6: rows[5].querySelector('.bv')?.textContent ?? null,
+        now: rows.filter((r) => r.classList.contains('now')).map((r) => r.querySelector('.no').textContent),
+        nowText: rows.find((r) => r.classList.contains('now'))?.querySelector('.st').textContent ?? '',
+        minH: Math.min(...rows.map((r) => Math.round(r.getBoundingClientRect().height))),
+        listScrolls: list.scrollHeight > list.clientHeight,
+        cardTop: Math.round(card.getBoundingClientRect().top),
+        cardBottom: Math.round(card.getBoundingClientRect().bottom),
+        inner: window.innerHeight,
+        docScroll: Math.round(document.documentElement.scrollHeight - window.innerHeight),
+      };
+    });
+    if (sel.rows !== 12) ng.push(`${w}x${h} ステージ選択: 行が ${sel.rows} 件`);
+    else if (sel.buttons !== 6) ng.push(`${w}x${h} ステージ選択: 押せる行が ${sel.buttons} 件（6 のはず）`);
+    else if (sel.lockedCount !== 6 || sel.lockedHasBest)
+      ng.push(`${w}x${h} ステージ選択: 未解放 ${sel.lockedCount} 件 / 記録の漏れ ${sel.lockedHasBest}`);
+    else if (sel.best1 !== '80' || sel.best6 !== null)
+      ng.push(`${w}x${h} ステージ選択: BEST の出方が best1=${sel.best1} best6=${sel.best6}`);
+    else if (sel.now.length !== 1 || !sel.nowText.includes('いま'))
+      ng.push(`${w}x${h} ステージ選択: 現在の行が ${JSON.stringify(sel.now)} / "${sel.nowText}"`);
+    else if (sel.minH < 44) ng.push(`${w}x${h} ステージ選択: 行の高さが ${sel.minH}px`);
+    else if (sel.cardTop < -1 || sel.cardBottom > sel.inner + 2)
+      ng.push(`${w}x${h} ステージ選択: カードが画面外（${sel.cardTop}〜${sel.cardBottom} / ${sel.inner}）`);
+    else if (sel.docScroll > 2) ng.push(`${w}x${h} ステージ選択: ページが ${sel.docScroll}px スクロールする`);
+    else
+      note.push(
+        `  ${w}x${h} ステージ選択: 12 行（押せる 6 / 未解放 6・名前も記録も無し）` +
+          ` BEST 80 ／ 現在行 "${sel.nowText}" ／ 行高 ${sel.minH}px ／ 一覧内スクロール ${sel.listScrolls}` +
+          ` ／ カード ${sel.cardTop}〜${sel.cardBottom} ≦ ${sel.inner} ／ ページスクロール ${sel.docScroll}`,
+      );
+    if (w === 430) await sp.screenshot({ path: `${SHOT_DIR}/w4-stage-select-430x932.png` });
+
+    // 選んで遊ぶ → プレイ画面にスクロールが出ない
+    await sp.evaluate(() => document.querySelector('#overlayCard button[data-stage="2"]')?.click());
+    await sp.waitForTimeout(500);
+    await dismissCard(sp);
+    await sp.waitForTimeout(300);
+    const play = await sp.evaluate(() => ({
+      stage: window.__blast.state().stage,
+      docScroll: Math.round(document.documentElement.scrollHeight - window.innerHeight),
+      overlayOn: document.getElementById('overlay').classList.contains('on'),
+    }));
+    if (play.stage !== 2) ng.push(`${w}x${h} ステージ選択: 選んだのに Stage ${play.stage}`);
+    else if (play.docScroll > 2) ng.push(`${w}x${h} プレイ画面が ${play.docScroll}px スクロールする`);
+    else note.push(`  ${w}x${h} 再挑戦: 一覧から Stage 2 を開けて、プレイ画面のスクロールは 0`);
+    if (serrs.length) ng.push(`${w}x${h} ステージ選択: エラー ${serrs.length} 件 — ${serrs[0]}`);
+    await sctx.close();
+  }
+
+  // --- 全クリア済みのタイトルと、過去ステージ再挑戦で進行が後退しないこと
+  const actx = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2 });
+  const ap = await actx.newPage();
+  // **addInitScript では seed しない。**再読み込みのたびに走ってしまい、
+  // 「選び直した current が保存されているか」を上書きして隠してしまう。
+  await ap.goto(URL, { waitUntil: 'networkidle' });
+  await ap.evaluate(new Function(seed(12, 12)));
+  await ap.reload({ waitUntil: 'networkidle' });
+  await ap.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  await ap.waitForTimeout(400);
+  const allTitle = await ap.evaluate(() => {
+    const card = document.getElementById('overlayCard');
+    const r = card.getBoundingClientRect();
+    const ov = document.getElementById('overlay');
+    return {
+      body: document.querySelector('#overlayCard p')?.textContent ?? '',
+      btns: [...card.querySelectorAll('.btn')].map((b) => b.textContent),
+      top: Math.round(r.top),
+      bottom: Math.round(r.bottom),
+      inner: window.innerHeight,
+      overlayScroll: Math.round(ov.scrollHeight - ov.clientHeight),
+    };
+  });
+  if (allTitle.body.includes('つぎは')) ng.push(`全クリアタイトル: "つぎは" が出ている — "${allTitle.body}"`);
+  else if (!allTitle.body.includes('ぜん 12 ステージ クリア')) ng.push(`全クリアタイトル: "${allTitle.body}"`);
+  else if (!allTitle.body.includes('エンドレス さいこう 8375')) ng.push('全クリアタイトル: エンドレス最高記録が出ない');
+  else if (!allTitle.btns.some((t) => t && t.startsWith('エンドレス'))) ng.push('全クリアタイトル: エンドレスの入口が無い');
+  else if (allTitle.top < -1 || allTitle.bottom > allTitle.inner + 2 || allTitle.overlayScroll > 2)
+    ng.push(`全クリアタイトル: カードが画面外（${allTitle.top}〜${allTitle.bottom} / ${allTitle.inner} / 余り ${allTitle.overlayScroll}）`);
+  else
+    note.push(
+      `  320x568 全クリアタイトル: "${allTitle.body.replace(/\n/g, ' / ')}" ／ ` +
+        `ボタン ${JSON.stringify(allTitle.btns)} ／ カード ${allTitle.top}〜${allTitle.bottom} ≦ ${allTitle.inner}`,
+    );
+  await ap.screenshot({ path: `${SHOT_DIR}/w4-title-allclear-320x568.png` });
+
+  // 過去ステージを選んで遊び、再読み込みしても解放は後退しない
+  await ap.evaluate(() => {
+    const b = [...document.querySelectorAll('#overlayCard .btn')].find((x) => x.textContent === 'ステージをえらぶ');
+    if (b) b.click();
+  });
+  await ap.waitForTimeout(300);
+  await ap.evaluate(() => document.querySelector('#overlayCard button[data-stage="3"]')?.click());
+  await ap.waitForTimeout(500);
+  await ap.reload({ waitUntil: 'networkidle' });
+  await ap.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  await ap.waitForTimeout(300);
+  const back = await ap.evaluate(() => ({
+    prog: window.__blast.progress(),
+    body: document.querySelector('#overlayCard p')?.textContent ?? '',
+    endless: [...document.querySelectorAll('#overlayCard .btn')].some((b) => b.textContent.startsWith('エンドレス')),
+  }));
+  if (back.prog.cleared !== 12) ng.push(`再挑戦: cleared が ${back.prog.cleared} へ後退した`);
+  else if (back.prog.current !== 3) ng.push(`再挑戦: current が ${back.prog.current}（3 のはず）`);
+  else if (!back.endless) ng.push('再挑戦: エンドレスの解放が失われた');
+  else if (back.body.includes('つぎは')) ng.push(`再挑戦: 全クリア後なのに "つぎは" — "${back.body}"`);
+  else note.push(`  320x568 再挑戦: Stage 3 を選んで再読み込みしても cleared 12・エンドレス解放を維持`);
+  await actx.close();
 }
 
 if (errs.length) ng.push(`操作中に エラー ${errs.length} 件 — ${errs[0]}`);

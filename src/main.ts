@@ -3,16 +3,26 @@ import { GameScene, type SceneHooks } from './scenes/GameScene';
 import { Hud } from './ui/Hud';
 import { TutorialOverlay } from './ui/TutorialOverlay';
 import type { AttackPlacement } from './game/attack';
-import { isUnlocked, loadProgress, saveProgress, withCleared, withCurrent } from './game/progress';
+import { loadProgress, saveProgress, withCleared, withCurrent } from './game/progress';
 import { loadSettings, saveSettings } from './game/settings';
 import { ENDLESS_ID, createEndlessStage, newEndlessSeed } from './game/endless';
 import { loadStats, saveStats, withAllClear, withEndlessRun } from './game/stats';
+import {
+  NO_UPDATE,
+  hasUpdate,
+  loadRecords,
+  saveRecords,
+  shouldRecordClear,
+  withClear,
+  type RecordUpdate,
+} from './game/records';
+import { allCleared, stageRows, titleBody } from './ui/cardText';
 import { Sfx, createWebAudioBackend } from './audio/sfx';
 import { DebugPanel } from './ui/DebugPanel';
 import { PlayMetrics } from './ui/PlayMetrics';
 import { computeLayout, type Layout } from './ui/layout';
 import { previewPlacement } from './game/Preview';
-import { FIRST_STAGE, LAST_STAGE, STAGES } from './data/stages';
+import { FIRST_STAGE, LAST_STAGE } from './data/stages';
 import type { StageState } from './game/StageState';
 
 /**
@@ -41,6 +51,9 @@ let currentStage = progress.current;
 
 /** プレイ記録（工程 W-3）。**進行データとも音設定とも別のキー**（stats.ts）。 */
 let stats = loadStats();
+
+/** 通常ステージの自己記録（工程 W-4）。**進行データとは別のキー**（records.ts）。 */
+let records = loadRecords();
 
 /** いまエンドレスを遊んでいるか。**進行データには一切書かない。** */
 let endlessMode = false;
@@ -111,14 +124,29 @@ const hooks: SceneHooks = {
       return;
     }
     // クリアしたら進行を進める。**失敗では進めない。**演出の途中経過は保存しない。
+    //
+    // 記録の更新も**ここ 1 か所だけ**で行う（工程 W-4 の 5）。カードの再描画・
+    // 音 ON/OFF・NEXT STAGE・ステージ選択・再読み込みはこの関数を通らないので、
+    // 同じクリア結果で clearCount が 2 回増えることはない。
+    let update: RecordUpdate = NO_UPDATE;
     if (state.status === 'cleared') {
       progress = withCleared(progress, state.def.id);
       saveProgress(progress);
+      if (shouldRecordClear(state.def, state.status)) {
+        const next = withClear(records, state.def.id, {
+          score: state.score,
+          movesUsed: state.movesUsed,
+          maxChain: state.maxChain,
+        });
+        records = next.records;
+        update = next.update;
+        saveRecords(records);
+      }
       sfx.play('clear');
     } else if (state.status === 'failed') {
       sfx.play('fail');
     }
-    if (state.status === 'cleared') showClear(state);
+    if (state.status === 'cleared') showClear(state, update);
     else showFailed(state);
   },
 };
@@ -560,19 +588,108 @@ function bindSoundToggle(): void {
   });
 }
 
+/** 結果 1 行ぶん。`neu` が true の行だけ「NEW」を付ける（工程 W-4）。 */
+interface StatRow {
+  readonly k: string;
+  readonly v: string;
+  readonly neu?: boolean;
+}
+
 /**
  * 結果の数字の並び。**1 行 1 項目**にして、左に項目名・右に数字で読ませる。
  * 既存の `stats` 欄は 1 行の文字列なので、項目が増えると 320px で折り返して読みにくい。
+ * **どの項目が新記録かは行ごとの印で示す。**別表を作らない。
  */
-function statListHtml(rows: readonly (readonly [string, string])[]): string {
+function statListHtml(rows: readonly StatRow[]): string {
   return (
     '<div class="statList">' +
     rows
-      .map(([k, v]) => `<div class="statRow"><span class="k">${escapeHtml(k)}</span>` +
-        `<span class="v">${escapeHtml(v)}</span></div>`)
+      .map(
+        (r) =>
+          `<div class="statRow${r.neu ? ' neu' : ''}"><span class="k">${escapeHtml(r.k)}</span>` +
+          (r.neu ? '<span class="new">NEW</span>' : '') +
+          `<span class="v">${escapeHtml(r.v)}</span></div>`,
+      )
       .join('') +
     '</div>'
   );
+}
+
+/**
+ * クリア結果の 3 行。**新記録の項目には行ごとに印を付ける。**
+ * clearCount はここへ出さない（情報過多になるので、ステージ選択側だけで見せる）。
+ */
+function clearStatsHtml(state: StageState, update: RecordUpdate): string {
+  return (
+    (hasUpdate(update) ? '<div class="record">NEW RECORD</div>' : '') +
+    statListHtml([
+      { k: 'SCORE', v: String(state.score), neu: update.score },
+      { k: 'MOVES USED', v: String(state.movesUsed), neu: update.movesUsed },
+      { k: 'MAX CHAIN', v: String(state.maxChain), neu: update.maxChain },
+    ])
+  );
+}
+
+/**
+ * ステージ選択の一覧。**番号だけのボタンから、記録が読める行へ変えた**（工程 W-4）。
+ * 未解放の行は**名前も記録も持たない**（内容は `stageRows` が決める。ui/cardText.ts）。
+ */
+function stageListHtml(): string {
+  const rows = stageRows(progress, records, currentStage, { devMode });
+  const body = rows
+    .map((r) => {
+      const state = `${r.current ? 'いま・' : ''}${r.label}`;
+      if (r.locked) {
+        return (
+          '<div class="stageRow locked" aria-disabled="true">' +
+          `<span class="no">${r.id}</span>` +
+          `<span class="mid"><span class="nm">— — —</span><span class="st">${escapeHtml(state)}</span></span>` +
+          '</div>'
+        );
+      }
+      const count = r.clearCount !== null ? `・${r.clearCount} 回` : '';
+      const best =
+        r.bestScore !== null
+          ? `<span class="best"><span class="bk">BEST</span><span class="bv">${r.bestScore}</span></span>`
+          : '<span class="best"></span>';
+      return (
+        `<button type="button" class="stageRow${r.cleared ? ' done' : ''}${r.current ? ' now' : ''}" ` +
+        `data-stage="${r.id}">` +
+        `<span class="no">${r.id}</span>` +
+        `<span class="mid"><span class="nm">${escapeHtml(r.name ?? '')}</span>` +
+        `<span class="st">${escapeHtml(state + count)}</span></span>` +
+        best +
+        '</button>'
+      );
+    })
+    .join('');
+  return `<div class="stageList">${body}</div>`;
+}
+
+/** ステージ選択の行を結線する。**`data-i` を持たないので showCard は触らない。** */
+function bindStageList(): void {
+  overlayCard.querySelectorAll('button[data-stage]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = Number(btn.getAttribute('data-stage'));
+      hideCard();
+      goStage(id);
+    });
+  });
+  showCurrentStageRow();
+}
+
+/**
+ * いまのステージの行が見える位置まで一覧を送る。
+ * **一覧の中だけを動かす。**`scrollIntoView` は祖先まで巻き込むので使わない
+ * （プレイ画面にスクロールを起こさないため）。
+ */
+function showCurrentStageRow(): void {
+  const list = overlayCard.querySelector<HTMLElement>('.stageList');
+  const now = list?.querySelector<HTMLElement>('.stageRow.now');
+  if (!list || !now) return;
+  const lr = list.getBoundingClientRect();
+  const nr = now.getBoundingClientRect();
+  list.scrollTop += nr.top - lr.top - (list.clientHeight - nr.height) / 2;
 }
 
 /**
@@ -606,6 +723,7 @@ function endlessButton(): CardButton[] {
  */
 function showTitle(): void {
   const hasProgress = progress.cleared > 0;
+  // 文面は cardText.titleBody が決める。**全クリア後に「つぎは ステージ N」を出さない。**
   const start = (): void => {
     // 最初のユーザー操作。ここで初めて AudioContext を起こす。
     sfx.unlock();
@@ -616,9 +734,7 @@ function showTitle(): void {
     title: GAME_TITLE,
     cardClass: 'title',
     figure: true,
-    body: hasProgress
-      ? `ステージ ${progress.cleared} まで クリア\nつぎは ステージ ${progress.current}`
-      : 'ブロックを ならべて ラインを けそう',
+    body: titleBody(progress, stats),
     extraHtml: soundToggleHtml(),
     buttons: hasProgress
       ? [
@@ -636,17 +752,13 @@ function showStageSelect(): void {
   const open = Math.min(LAST_STAGE, progress.cleared + 1);
   showCard({
     title: 'ステージをえらぶ',
-    body: devMode ? undefined : `クリアすると つぎの ステージが ひらきます（いま ${open} まで）`,
-    extraHtml: soundToggleHtml(),
-    buttons: [
-      ...STAGES.filter((st) => devMode || isUnlocked(progress, st.id)).map((st) => ({
-        label: `${st.id}`,
-        primary: st.id === currentStage && !endlessMode,
-        onClick: () => goStage(st.id),
-      })),
-      ...endlessButton(),
-    ],
+    body: devMode || allCleared(progress) ? undefined : `クリアすると つぎが ひらきます（いま ${open} まで）`,
+    // 一覧はボタン列ではなくカード本体へ置く。**12 件を 1 画面へ押し込まない**ので、
+    // 一覧だけが縦スクロールする（プレイ画面にはスクロールを起こさない）。
+    extraHtml: stageListHtml() + soundToggleHtml(),
+    buttons: [{ label: 'タイトルへ', onClick: () => goTitle() }, ...endlessButton()],
   });
+  bindStageList();
   bindSoundToggle();
 }
 
@@ -654,7 +766,7 @@ function showStageSelect(): void {
  * 全ステージクリアの締め。**進行データは消さない。**
  * 「もう一度あそぶ」は Stage 1 を開くだけで、クリア済みの記録はそのまま残る。
  */
-function showAllClear(state: StageState): void {
+function showAllClear(state: StageState, update: RecordUpdate): void {
   // 全クリアの回数を記録する。**進行データ（どこまで開いたか）は動かさない。**
   stats = withAllClear(stats);
   saveStats(stats);
@@ -667,8 +779,7 @@ function showAllClear(state: StageState): void {
     body:
       `ぜん ${LAST_STAGE} ステージを クリアしました。\nさいごの ステージ ${state.def.id} も とっぱです。` +
       (times > 1 ? `\nぜんクリア ${times} 回目。` : '\nエンドレスが あそべるように なりました。'),
-    stats: `SCORE ${state.score}   MOVES USED ${state.movesUsed}   MAX CHAIN ${state.maxChain}`,
-    extraHtml: soundToggleHtml(),
+    extraHtml: clearStatsHtml(state, update) + soundToggleHtml(),
     buttons: [
       { label: 'ステージをえらぶ', onClick: () => showStageSelect() },
       { label: 'もう一度あそぶ', primary: true, onClick: () => goStage(FIRST_STAGE) },
@@ -678,11 +789,11 @@ function showAllClear(state: StageState): void {
   bindSoundToggle();
 }
 
-function showClear(state: StageState): void {
+function showClear(state: StageState, update: RecordUpdate): void {
   const isLast = state.def.id >= LAST_STAGE;
   // 最終ステージのクリアは締めの画面にする。**Stage 1 へ即座に戻さない。**
   if (isLast) {
-    showAllClear(state);
+    showAllClear(state, update);
     startTalk();
     return;
   }
@@ -694,7 +805,8 @@ function showClear(state: StageState): void {
     talk: true,
     // 教材ステージだけ「いま盤面で何が起きたか」を答え合わせする。文言はステージデータ側。
     body: state.def.tutorial.outro,
-    stats: `SCORE ${state.score}   MOVES USED ${state.movesUsed}   MAX CHAIN ${state.maxChain}`,
+    // 記録は 1 行 1 項目。**新記録の項目にだけ行ごとの印**が付く（工程 W-4 の 6）。
+    extraHtml: clearStatsHtml(state, update),
     buttons: isLast
       ? [
           { label: 'RETRY', onClick: () => retryStage() },
@@ -793,11 +905,11 @@ function endEndlessRun(state: StageState): void {
       extraHtml:
         (record ? '<div class="record">ハイスコア こうしん！</div>' : '') +
         statListHtml([
-          ['SCORE', String(state.score)],
-          ['HIGH SCORE', String(stats.endlessBest)],
-          ['TURNS', String(state.movesUsed)],
-          ['MAX CHAIN', String(state.maxChain)],
-          ['PLAYED', `${stats.endlessRuns} 回`],
+          { k: 'SCORE', v: String(state.score) },
+          { k: 'HIGH SCORE', v: String(stats.endlessBest) },
+          { k: 'TURNS', v: String(state.movesUsed) },
+          { k: 'MAX CHAIN', v: String(state.maxChain) },
+          { k: 'PLAYED', v: `${stats.endlessRuns} 回` },
         ]) +
         soundToggleHtml(),
       buttons: [
@@ -933,6 +1045,8 @@ window.__blast = {
   progress: () => ({ ...progress, devMode, sound: settings.sound, endless: endlessMode }),
   /** プレイ記録（自動確認から読むため）。 */
   stats: () => ({ ...stats }),
+  /** 通常ステージの自己記録（自動確認から読むため）。 */
+  records: () => ({ stages: { ...records.stages } }),
   /** エンドレスを始める。**通常は全ステージクリアで開くが、検証用にここからも入れる。** */
   goEndless: () => goEndless(),
   showTitle: () => showTitle(),

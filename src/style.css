@@ -125,6 +125,80 @@ button.btn.narrow { flex: 0 0 64px; }
 #overlay .statRow { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
 #overlay .statRow .k { color: var(--muted); letter-spacing: .06em; }
 #overlay .statRow .v { font-variant-numeric: tabular-nums; }
+/* 新記録の項目（工程 W-4）。**点滅も拡大もしない。**小さな印を 1 つ足すだけ。 */
+#overlay .statRow .new {
+  margin-left: 6px;
+  margin-right: auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #e8a51f;
+  color: #241d30;
+  font-size: 10px;
+  letter-spacing: .06em;
+  line-height: 16px;
+}
+#overlay .statRow.neu .v { color: #e8a51f; }
+#overlay .card.failed .statRow.neu .v { color: #a0180e; }
+#overlay .card.failed .statRow .new { background: #a0180e; color: #ede1ed; }
+
+/* ステージ選択の一覧（工程 W-4）。**12 件を 1 画面へ押し込まない。**
+   ここだけが縦スクロールする。プレイ画面にはスクロールを起こさない。
+   行の高さは 44px 以上（タップ領域）。 */
+#overlay .stageList {
+  margin: 10px 0 0;
+  max-height: min(46vh, 430px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 端まで続いていることが分かるよう、右に余白を残す。 */
+  padding-right: 2px;
+}
+#overlay .stageRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 46px;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+#overlay .stageRow:active { background: #323949; }
+#overlay .stageRow:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#overlay .stageRow .no {
+  flex: 0 0 24px;
+  text-align: center;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+#overlay .stageRow .mid { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+#overlay .stageRow .nm {
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#overlay .stageRow .st { font-size: 10px; line-height: 1.4; color: var(--muted); }
+#overlay .stageRow .best { flex: 0 0 auto; text-align: right; min-width: 52px; }
+#overlay .stageRow .bk { display: block; font-size: 9px; color: var(--muted); letter-spacing: .06em; }
+#overlay .stageRow .bv { display: block; font-size: 13px; font-variant-numeric: tabular-nums; }
+/* クリア済み：番号を達成色にする。**色だけに頼らず、状態の文字も出している。** */
+#overlay .stageRow.done .no { color: var(--ok); }
+/* いま選ばれている行：枠を太くし、状態欄にも「いま・」を出す（色だけで示さない）。 */
+#overlay .stageRow.now { border-color: var(--accent); border-width: 2px; padding: 3px 7px; }
+/* 未解放：押せない。名前も記録も出さない。 */
+#overlay .stageRow.locked { background: transparent; border-style: dashed; cursor: default; }
+#overlay .stageRow.locked .nm { color: var(--muted); letter-spacing: .1em; }
+
 /* ハイスコア更新。**点滅させない。**色と枠だけで示す。 */
 #overlay .record {
   margin: 10px 0 0;
@@ -388,6 +462,13 @@ button.btn.narrow { flex: 0 0 64px; }
 #overlay .card.title p { text-align: center; }
 #overlay .card.title .figStack { width: 106px; height: 251px; }
 #overlay .card.title .figStack img { width: 106px; height: 251px; }
+/* 画面が低いとき（320x568 など）は、タイトルの人物だけをさらに小さくする。
+   全クリア後は本文が 3 行になるので、**カードを画面の外へ出さないため**（工程 W-4 の 2）。
+   人物は装飾なので、縮めても読む情報は減らない。 */
+@media (max-height: 600px) {
+  #overlay .card.title .figStack { width: 96px; height: 227px; }
+  #overlay .card.title .figStack img { width: 96px; height: 227px; }
+}
 
 /* 失敗カードのネイ（工程 W-3）。**勝利カードと同じ画像を、タイトルと同じ縮尺で出す。**
    FAILED は理由・SCORE・RETRY を必ず見せる画面なので、375x667 でもカードが
