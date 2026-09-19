@@ -42,18 +42,62 @@ Phase 1 の実物レビューを受けて、Phase 2A でコアルールの数値
   完成演出まで作り直した昼（A2-HW-R Candy Kingdom）と夜（N1 Night Candy Kingdom）の比較。
   盤面可読性の実測つき。**採用は未決定。アプリへは未実装。**
 
-## 動かす
+## 遊ぶ（公開版）
+
+**<https://yumera-games.github.io/blast-block-puzzle/>**
+
+スマートフォンのブラウザでこの URL を開くだけで遊べます。サーバーの起動は要りません。
+進行・音の設定・ステージ記録・エンドレスの記録は、その端末のブラウザに保存されます
+（`localStorage`。端末をまたいでは引き継がれません）。
+
+## 動かす（開発）
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173/
+npm run dev        # http://localhost:5173/（スマートフォン実機からは Network の URL）
 npm run verify     # typecheck + unit test + build
 npm run smoke      # dev/preview サーバへ Playwright で実操作テスト
 npm run stats      # コアルールの統計測定（バランス調整の前後比較用）
 ```
 
+`npm run dev` は `host: true` なので、同じ Wi-Fi のスマートフォンからも
+「Network: http://192.168.x.x:5173/」で開けます。
+
 `npm run smoke` は起動中のサーバへ接続します（既定 `http://localhost:5183/`。
 第1引数で URL を渡せます）。
+
+公開版と同じ**サブパス**で本番ビルドを確かめるには:
+
+```bash
+npm run build
+node tools/serve-pages.mjs          # http://localhost:5184/blast-block-puzzle/
+node tools/smoke.mjs http://localhost:5184/blast-block-puzzle/
+```
+
+## 配信（GitHub Pages）
+
+`main` へ push すると `.github/workflows/pages.yml` が動き、
+**typecheck → vitest → build** を通してから `dist/` を GitHub Pages へ配信します。
+手作業の公開操作はありません（Actions タブから手動実行もできます）。
+
+- 配信されるのは `dist/` だけです。`docs/` の設計資料と登録原本は**含まれません**。
+- 公開先がサブパス `/blast-block-puzzle/` なので、`vite.config.ts` は
+  `base: './'`（相対パス）のままにしてあります。生成される HTML は `./assets/...` を指し、
+  `import.meta.env.BASE_URL` も `./` なので、どのサブパスへ置いても解決できます。
+- 外部 CDN・外部音源・外部画像には依存していません。音は Web Audio の合成音、
+  画像は `public/characters/` の WebP だけです。
+
+## 通常モードとデバッグモード
+
+| | 通常（公開版の URL をそのまま開く） | デバッグ（`?debug=1` または `#debug`） |
+| --- | --- | --- |
+| タイトル画面 | 出る | 出る（`?debug=1&skipTitle=1` で飛ばせる） |
+| DBG ボタン | **出ない**（DOM からも消える） | 出る |
+| ステージ選択 | 到達済み＋次の 1 つだけ | 全 12 ステージ |
+| エンドレス | 全 12 ステージをクリアしてから | 未クリアでも入口が出る |
+
+デバッグモードは**自分で URL に付けたときだけ**有効です。アプリ側が付けることはありません。
+ゲームのルール・盤面・得点・記録の扱いは、どちらのモードでも同じです。
 
 ## 構造
 
