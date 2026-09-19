@@ -22,6 +22,7 @@ import { DebugPanel } from './ui/DebugPanel';
 import { PlayMetrics } from './ui/PlayMetrics';
 import { computeLayout, type Layout } from './ui/layout';
 import { previewPlacement } from './game/Preview';
+import { registerServiceWorker, type SwResult } from './pwa';
 import { FIRST_STAGE, LAST_STAGE } from './data/stages';
 import type { StageState } from './game/StageState';
 
@@ -998,6 +999,24 @@ game.events.once('ready', () => {
   showTitle();
 });
 
+/* ------------------------------------------- ホーム画面からの起動（W-7） */
+
+/**
+ * Service Worker の登録。**ページの読み込みが済んでから**、結果を待たずに行う。
+ * 失敗しても対応していなくても、ここから先へ影響させない（pwa.ts）。
+ * 開発サーバでは登録しない（更新の取り違えを避けるため本番ビルドのときだけ）。
+ */
+let swResult: SwResult = 'skipped';
+window.addEventListener('load', () => {
+  void registerServiceWorker({
+    sw: typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined,
+    enabled: import.meta.env.PROD,
+    base: import.meta.env.BASE_URL,
+  }).then((r) => {
+    swResult = r;
+  });
+});
+
 // 検証用の入口。Phase 1 の自動確認（Playwright など）から状態を読むために出す。
 declare global {
   interface Window {
@@ -1047,6 +1066,8 @@ window.__blast = {
   stats: () => ({ ...stats }),
   /** 通常ステージの自己記録（自動確認から読むため）。 */
   records: () => ({ stages: { ...records.stages } }),
+  /** Service Worker の登録結果（自動確認から読むため）。ゲーム進行には影響しない。 */
+  sw: () => swResult,
   /** エンドレスを始める。**通常は全ステージクリアで開くが、検証用にここからも入れる。** */
   goEndless: () => goEndless(),
   showTitle: () => showTitle(),

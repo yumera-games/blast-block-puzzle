@@ -7,6 +7,18 @@
 <meta name="description" content="Project BLAST BLOCK — Phase 1 Gray Box">
 <title>BLAST BLOCK — Phase 1</title>
 <link rel="icon" href="data:,">
+<!-- ホーム画面からの起動（工程 W-7）。**viewport 設定は変更していない。**
+     公開先がサブパス /blast-block-puzzle/ なので、`/` 始まりで書いて
+     Vite の base（'./'）に書き換えさせる。ローカル開発でもそのまま解決できる。 -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0b0d18">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- content は black。**画面がステータスバーの下へ潜り込まない**ので、
+     HUD やボタンが時計に隠れる余地を作らない。 -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="BLAST BLOCK">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">
 <link rel="stylesheet" href="./src/style.css">
 </head>
 <body>

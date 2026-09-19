@@ -25,6 +25,7 @@ const TYPES = {
   '.webp': 'image/webp',
   '.png': 'image/png',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
 };
 

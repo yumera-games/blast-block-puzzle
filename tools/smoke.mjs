@@ -1331,6 +1331,253 @@ const dismissCard = (page) =>
   await actx.close();
 }
 
+/* ⑬ ホーム画面からの起動（工程 W-7）。
+   Manifest・アイコン・Service Worker が公開サブパスで 404 にならず、
+   一度ふつうに開いたあとはオフラインでも起動でき、保存が消えないことを見る。
+   **実機の「ホーム画面に追加」そのものは機械では試せない。**ここで見るのは材料だけ。 */
+{
+  const ready = (page) =>
+    page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          if (!('serviceWorker' in navigator)) return resolve('unsupported');
+          const t = setTimeout(() => resolve('timeout'), 8000);
+          navigator.serviceWorker.ready.then((r) => {
+            clearTimeout(t);
+            resolve(r.active ? r.active.state : 'no-active');
+          });
+        }),
+    );
+
+  for (const [w, h] of [[320, 568], [393, 852], [430, 932]]) {
+    const pctx2 = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2 });
+    const pg = await pctx2.newPage();
+    const perrs = [];
+    pg.on('pageerror', (e) => perrs.push(String(e.message)));
+    pg.on('console', (m) => { if (m.type() === 'error') perrs.push('console: ' + m.text()); });
+    await pg.goto(URL, { waitUntil: 'networkidle' });
+    await pg.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+
+    // 配信物がサブパスで取れるか（404 でないか）
+    const files = await pg.evaluate(async () => {
+      const list = [
+        'manifest.webmanifest',
+        'sw.js',
+        'icons/icon-192.png',
+        'icons/icon-512.png',
+        'icons/icon-512-maskable.png',
+        'icons/apple-touch-icon-180.png',
+      ];
+      const out = {};
+      for (const f of list) {
+        const res = await fetch(new URL(f, document.baseURI).href);
+        out[f] = res.status;
+      }
+      return out;
+    });
+    const bad = Object.entries(files).filter(([, code]) => code !== 200);
+    if (bad.length) ng.push(`${w}x${h} PWA: 取得できない配信物 ${JSON.stringify(bad)}`);
+
+    // HTML の宣言と、アイコンが実ブラウザで画像としてデコードできるか
+    const head = await pg.evaluate(async () => {
+      const man = document.querySelector('link[rel="manifest"]');
+      const apple = document.querySelector('link[rel="apple-touch-icon"]');
+      const decode = (href) =>
+        new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve(`${img.naturalWidth}x${img.naturalHeight}`);
+          img.onerror = () => resolve('error');
+          img.src = href;
+        });
+      const manifest = await (await fetch(man.href)).json();
+      return {
+        manifestHref: man.getAttribute('href'),
+        manifestResolved: man.href,
+        scopeResolved: new URL(manifest.scope, man.href).href,
+        startResolved: new URL(manifest.start_url, man.href).href,
+        display: manifest.display,
+        orientation: manifest.orientation,
+        theme: document.querySelector('meta[name="theme-color"]')?.content,
+        appleTitle: document.querySelector('meta[name="apple-mobile-web-app-title"]')?.content,
+        appleCapable: document.querySelector('meta[name="apple-mobile-web-app-capable"]')?.content,
+        appleBar: document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.content,
+        appleIcon: await decode(apple.href),
+        i192: await decode(new URL('icons/icon-192.png', document.baseURI).href),
+        i512: await decode(new URL('icons/icon-512.png', document.baseURI).href),
+        iMask: await decode(new URL('icons/icon-512-maskable.png', document.baseURI).href),
+        page: new URL('./', location.href).href,
+      };
+    });
+    const sizes = [head.appleIcon, head.i192, head.i512, head.iMask].join(' ');
+    if (head.scopeResolved !== head.page || head.startResolved !== head.page)
+      ng.push(`${w}x${h} PWA: scope/start_url が ${head.scopeResolved} / ${head.startResolved}（${head.page} のはず）`);
+    else if (head.display !== 'standalone' || head.orientation !== 'portrait')
+      ng.push(`${w}x${h} PWA: display=${head.display} orientation=${head.orientation}`);
+    else if (sizes !== '180x180 192x192 512x512 512x512')
+      ng.push(`${w}x${h} PWA: アイコンを画像として読めない（${sizes}）`);
+    else if (head.appleCapable !== 'yes' || !head.appleBar || head.appleTitle !== 'BLAST BLOCK')
+      ng.push(`${w}x${h} PWA: Apple 用のメタ情報が足りない ${JSON.stringify(head)}`);
+
+    // Service Worker が登録され、ページを支配するようになるか
+    const state1 = await ready(pg);
+    await pg.reload({ waitUntil: 'networkidle' });
+    await pg.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+    const view = await pg.evaluate(() => ({
+      sw: window.__blast.sw(),
+      controlled: !!navigator.serviceWorker.controller,
+      overlay: document.getElementById('overlay').classList.contains('titleScreen'),
+      h2: document.querySelector('#overlayCard h2')?.textContent ?? '',
+      dbg: !!document.getElementById('btnDebug'),
+      docScroll: Math.round(document.documentElement.scrollHeight - window.innerHeight),
+      ctrlBottom: Math.round(document.getElementById('controls').getBoundingClientRect().bottom),
+      padBottom: getComputedStyle(document.getElementById('app')).paddingBottom,
+      padTop: getComputedStyle(document.getElementById('app')).paddingTop,
+      inner: window.innerHeight,
+    }));
+    if (state1 !== 'activated') ng.push(`${w}x${h} PWA: Service Worker が有効にならない（${state1}）`);
+    else if (view.sw !== 'registered') ng.push(`${w}x${h} PWA: 登録結果が ${view.sw}`);
+    else if (!view.controlled) ng.push(`${w}x${h} PWA: 再読み込み後もページを支配していない`);
+    else if (!view.overlay || view.h2 !== 'BLAST BLOCK') ng.push(`${w}x${h} PWA: タイトルから始まらない（"${view.h2}"）`);
+    else if (view.dbg) ng.push(`${w}x${h} PWA: 通常モードで DBG が出ている`);
+    else if (view.docScroll > 2) ng.push(`${w}x${h} PWA: ページが ${view.docScroll}px スクロールする`);
+    else if (view.ctrlBottom > view.inner) ng.push(`${w}x${h} PWA: 操作列が画面の外（${view.ctrlBottom} > ${view.inner}）`);
+    else
+      note.push(
+        `  ${w}x${h} PWA: 配信物 6 点 200 ／ アイコン ${sizes} ／ scope ${head.scopeResolved}` +
+          ` ／ SW ${state1}・支配下 ／ タイトルから開始・DBG 非表示 ／ スクロール 0` +
+          ` ／ 余白 上 ${view.padTop} 下 ${view.padBottom}（操作列 ${view.ctrlBottom} ≦ ${view.inner}）`,
+      );
+
+    // 実際に遊んで保存を作る → オフラインで再起動 → 保存が残っているか
+    await pg.evaluate(() => {
+      const b = [...document.querySelectorAll('#overlayCard .btn')].find((x) => x.textContent === 'はじめる');
+      if (b) b.click();
+    });
+    await pg.waitForTimeout(500);
+    await dismissCard(pg);
+    await pg.waitForTimeout(300);
+    await dragOn(pg, 0, 7, 7);
+    await settle(pg);
+    await pg.waitForTimeout(700);
+    const saved = await pg.evaluate(() => ({
+      prog: window.__blast.progress(),
+      rec: window.__blast.records().stages['1'],
+    }));
+
+    await pctx2.setOffline(true);
+    await pg.reload({ waitUntil: 'domcontentloaded' });
+    const offlineOk = await pg
+      .waitForFunction(() => !!window.__blast, null, { timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    const offline = offlineOk
+      ? await pg.evaluate(() => ({
+          h2: document.querySelector('#overlayCard h2')?.textContent ?? '',
+          prog: window.__blast.progress(),
+          rec: window.__blast.records().stages['1'],
+          board: !!document.querySelector('#game canvas'),
+        }))
+      : null;
+    await pctx2.setOffline(false);
+
+    if (!offlineOk) ng.push(`${w}x${h} PWA: オフラインで起動できない`);
+    else if (offline.h2 !== 'BLAST BLOCK') ng.push(`${w}x${h} PWA: オフライン起動でタイトルが出ない（"${offline.h2}"）`);
+    else if (!offline.board) ng.push(`${w}x${h} PWA: オフライン起動で盤面の canvas が作られない`);
+    else if (offline.prog.cleared !== saved.prog.cleared || JSON.stringify(offline.rec) !== JSON.stringify(saved.rec))
+      ng.push(`${w}x${h} PWA: オフラインで保存が変わった ${JSON.stringify(offline.prog)} ${JSON.stringify(offline.rec)}`);
+    else
+      note.push(
+        `  ${w}x${h} PWA: オフラインでもタイトルから起動でき、保存も維持` +
+          `（cleared ${offline.prog.cleared} / Stage1 BEST ${offline.rec.bestScore}・${offline.rec.clearCount} 回）`,
+      );
+
+    // オンラインへ戻しても保存はそのまま
+    await pg.reload({ waitUntil: 'networkidle' });
+    await pg.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+    const back = await pg.evaluate(() => ({
+      prog: window.__blast.progress(),
+      rec: window.__blast.records().stages['1'],
+      caches: 'caches' in window,
+    }));
+    if (back.prog.cleared !== saved.prog.cleared || JSON.stringify(back.rec) !== JSON.stringify(saved.rec))
+      ng.push(`${w}x${h} PWA: オンラインへ戻したら保存が変わった`);
+    else note.push(`  ${w}x${h} PWA: オンラインへ戻しても保存はそのまま`);
+
+    // 古いキャッシュが、**新しい Service Worker が有効になったとき**に消えるか。
+    //
+    // 後片付けは activate のときにだけ走る。動いている worker のままでは起きないので、
+    // いったん登録を外して読み込み直し、**本当に新しく有効化させてから**確かめる
+    // （読み込み直すと、ページ側の load で同じ 1 行が改めて登録する）。
+    const before = await pg.evaluate(async () => {
+      await caches.open('blast-block-v0-old');
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) await reg.unregister();
+      return (await caches.keys()).sort();
+    });
+    await pg.reload({ waitUntil: 'networkidle' });
+    await pg.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+    const cleaned = await pg.evaluate(async () => {
+      await navigator.serviceWorker.ready;
+      for (let i = 0; i < 60 && (await caches.keys()).includes('blast-block-v0-old'); i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const reg = await navigator.serviceWorker.getRegistration();
+      return { after: (await caches.keys()).sort(), state: reg && reg.active ? reg.active.state : null };
+    });
+    if (cleaned.after.includes('blast-block-v0-old'))
+      ng.push(`${w}x${h} PWA: 古いキャッシュが消えない ${JSON.stringify(cleaned.after)}`);
+    else if (cleaned.after.length !== 1 || !cleaned.after[0].startsWith('blast-block-'))
+      ng.push(`${w}x${h} PWA: キャッシュが ${JSON.stringify(cleaned.after)}`);
+    else if (cleaned.state !== 'activated')
+      ng.push(`${w}x${h} PWA: 登録し直した Service Worker が ${cleaned.state}`);
+    else
+      note.push(
+        `  ${w}x${h} PWA: 新しく有効化したとき古いキャッシュを整理（${JSON.stringify(before)} → ${JSON.stringify(cleaned.after)}）`,
+      );
+
+    if (perrs.length) ng.push(`${w}x${h} PWA: エラー ${perrs.length} 件 — ${perrs[0]}`);
+    await pctx2.close();
+  }
+
+  // reduced-motion の既存動作が変わっていないこと（Service Worker 有効下で見る）
+  const rmctx = await browser.newContext({
+    viewport: { width: 393, height: 852 },
+    deviceScaleFactor: 2,
+    reducedMotion: 'reduce',
+  });
+  const rmp = await rmctx.newPage();
+  await rmp.goto(URL, { waitUntil: 'networkidle' });
+  await rmp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  await rmp.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const t = setTimeout(resolve, 8000);
+        navigator.serviceWorker.ready.then(() => {
+          clearTimeout(t);
+          resolve();
+        });
+      }),
+  );
+  await rmp.reload({ waitUntil: 'networkidle' });
+  await rmp.waitForFunction(() => !!window.__blast, null, { timeout: 10000 });
+  await rmp.evaluate(() => window.__blast.goStage(10));
+  await rmp.waitForTimeout(400);
+  await rmp.evaluate(() => { const b = document.querySelector('#overlayCard button'); if (b) b.click(); });
+  await rmp.waitForTimeout(400);
+  await dragOn(rmp, 0, 7, 2);
+  await rmp.waitForTimeout(300);
+  const rm2 = await rmp.evaluate(() => {
+    const e = document.getElementById('attackFigure');
+    const cs = getComputedStyle(e);
+    return { on: e.classList.contains('on'), anim: cs.animationName, transform: cs.transform, controlled: !!navigator.serviceWorker.controller };
+  });
+  if (!rm2.controlled) ng.push('PWA: reduced-motion の確認で Service Worker が効いていない');
+  else if (!rm2.on || rm2.anim !== 'none' || rm2.transform !== 'none')
+    ng.push(`PWA: Service Worker 下で reduced-motion の attack が変わった ${JSON.stringify(rm2)}`);
+  else note.push('  PWA: Service Worker が効いていても reduced-motion の attack は同じ静止表示');
+  await rmctx.close();
+}
+
 if (errs.length) ng.push(`操作中に エラー ${errs.length} 件 — ${errs[0]}`);
 
 await browser.close();
