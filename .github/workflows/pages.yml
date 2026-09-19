@@ -1,0 +1,71 @@
+# GitHub Pages への配信（工程 W-6）。
+#
+# main へ push されたら、検査（typecheck / vitest）を通してから本番ビルドを作り、
+# そのまま Pages へ配信する。**配信するのは dist/ だけ**で、
+# docs/ の設計資料や登録原本は入らない（Vite の出力に含まれないため）。
+#
+# 公開先は https://yumera-games.github.io/blast-block-puzzle/ という
+# **サブパス**なので、vite.config.ts の `base: './'`（相対パス）をそのまま使う。
+# 生成される HTML は `./assets/...` を指し、`import.meta.env.BASE_URL` も `./` なので、
+# どのサブパスへ置いても解決できる。**この工程で base は変更していない。**
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  # 手動でも実行できるようにする（設定を直したあとの再配信用）。
+  workflow_dispatch:
+
+# 必要最小限だけ。contents は読み取りのみ。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時デプロイの競合を防ぐ。**実行中のデプロイは打ち切らない**
+# （途中で止めると公開物が壊れた状態で残りうるため）。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Vite 7 は Node 20.19+ / 22.12+ を要求する。LTS の 22 を使う。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # 検査を通ってからでなければ配信しない。
+      - run: npm run typecheck
+      - run: npm test
+
+      - run: npm run build
+
+      # Playwright を使う smoke はここでは動かさない（実ブラウザ確認は手元で行う）。
+
+      # Pages がまだ有効でなければ、この step が有効化まで行う
+      # （`permissions: pages: write` の範囲。管理画面の手操作を不要にするため）。
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
